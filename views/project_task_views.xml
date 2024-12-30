@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+  <odoo>
+    <data>   
+      <!-- View project.task form -->
+      <record id="view_project_task_form_invoice" model="ir.ui.view">
+          <field name="name">custom.view.project.task.form</field>
+          <field name="model">project.task</field>
+          <field name="inherit_id" ref="project.view_task_form2"/>
+          <field name="arch" type="xml">
+            <xpath expr="//form/header/button[@name='action_assign_to_me']" position="after">
+                <button name="action_create_income_invoice"
+                        string="Factura de ingreso"
+                        type="object"
+                        class="btn-primary"/>
+                <button name="action_create_outcome_invoice"
+                        string="Factura de egreso"
+                        type="object"
+                        class="btn-primary"/>
+                <button name="action_create_storage_invoice"
+                        string="Factura de almacenamiento"
+                        type="object"
+                        class="btn-primary"/>
+            </xpath>
+          </field>
+      </record>
+    </data>
+  </odoo>

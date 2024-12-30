@@ -7,8 +7,9 @@
     'website': '',
     'category': '',
     'depends': ['base', ],
-    'data': [
-        
+    "data": [
+        "views/project_task_views.xml",
+        "views/product_template_views.xml"
     ],
     'application': True,
     'installable': True,
