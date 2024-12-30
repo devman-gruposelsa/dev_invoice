@@ -10,7 +10,6 @@ _logger = logging.getLogger(__name__)
 class ProductTemplate(models.Model):
     _inherit = 'product.template'
 
-
     income_invoice_pack = fields.Boolean(string='Factura de ingreso')
     out_invoice_pack = fields.Boolean(string='Factura de Egreso')
     stock_invoice_pack = fields.Boolean(string='Factura de Almacenamiento')
