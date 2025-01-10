@@ -23,17 +23,5 @@
             </xpath>
           </field>
       </record>
-      <record model="ir.ui.view" id="custom_related_documents_form_view">
-        <field name="name">custom.view.project.task.form</field>
-        <field name="model">project.task</field>
-        <field name="inherit_id" ref="import_forlder_016.related_documents_form_view"/>
-        <field name="arch" type="xml">
-            <!-- Insertar el campo transit_total_cost después de discharge_invoice_check -->
-            <xpath expr="//field[@name='discharge_invoice_check']" position="after">
-                <field name="transit_total_cost" string="Transit Total Cost" widget="monetary" options="{'currency_field': 'company_currency_id'}"/>
-            </xpath>
-
-        </field>
-      </record>
     </data>
   </odoo>
