@@ -17,36 +17,19 @@ class ProjectTask(models.Model):
         help="Sum of the untaxed amounts of all filtered invoices associated with this task."
     )
 
-    invoice_ids_2 = fields.One2many('account.move','task_id', string='Facturas proveedor')
-
-    invoice_ids_filtered_2 = fields.Many2many(
-    comodel_name='account.move',
-    compute='_compute_invoice_ids_filtered',
-    store=True,
-    string='Facturas proveedor filtradas',
-    help="Facturas asociadas a esta tarea."
-    )
-
-    @api.depends('invoice_ids_2')
-    def _compute_invoice_ids_filtered(self):
-        """
-        Filtra las facturas relevantes asociadas a esta tarea.
-        """
-        for task in self:
-            task.invoice_ids_filtered_2 = [(6, 0, task.invoice_ids_2.ids)]
-            _logger.info("Task: %s | Filtered Invoices: %s", task.id, task.invoice_ids_2.ids)
-
-
-    @api.depends('invoice_ids_filtered_2.amount_untaxed_signed')
+    @api.onchange('purchase_order_ids.task_id', 'invoice_ids_filtered.amount_untaxed_signed')
     def _compute_transit_total_cost(self):
-        """
-        Calcula el costo total de tránsito sumando `amount_untaxed_signed`
-        de las facturas asociadas.
-        """
-        for task in self:
-            total_cost = sum(invoice.amount_untaxed_signed for invoice in task.invoice_ids_filtered_2)
-            task.transit_total_cost = total_cost
-            _logger.info("Task: %s | Transit Total Cost: %s", task.id, total_cost)
+        for rec in self:
+            invoices_filtered = []
+            invoices= self.env['account.move'].search([])
+            for record in invoices:
+                if record.task_id:
+                    for task in record.task_id:
+                        _logger.info("record.task_id %s", task)
+                        if task.id == rec.id:
+                            invoices_filtered.append(record.id)
+            rec.transit_total_cost = sum(invoices_filtered.amount_untaxed_signed)
+            _logger.info("invoices_filtered %s", invoices_filtered)
 
 
     def action_create_income_invoice(self):
