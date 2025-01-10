@@ -14,7 +14,7 @@ class ProjectTask(models.Model):
         self._create_sale_order('income_invoice_pack')
 
     def action_create_outcome_invoice(self):
-        self._create_sale_order('out_invoice_pack')
+        self._create_sale_order('outcome_invoice_pack')
 
     def _create_sale_order(self, product_pack_field):
         sale_order_obj = self.env['sale.order']
