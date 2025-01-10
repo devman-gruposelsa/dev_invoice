@@ -27,10 +27,10 @@
       <record model="ir.ui.view" id="custom_project_task_form_view_inherit">
         <field name="name">custom.project.form.view.inherit</field>
         <field name="model">project.task</field>
-        <field name="inherit_id" ref="dev_insurances.custom_project_task_form_view"/>
+        <field name="inherit_id" ref="project.view_task_form2"/>
         <field name="arch" type="xml">
             <!-- Añadir el campo transit_total_cost después de discharge_invoice_check -->
-            <xpath expr="//field[@name='zfe']" position="after">
+            <xpath expr="//field[@name='closing_date']" position="after">
                 <field name="transit_total_cost" string="Transit Total Cost" widget="monetary" options="{'currency_field': 'company_currency_id'}"/>
 		            <div class="oe_button_box" name="button_box_co" style="width: auto;">
                     <button name='costo_total_transito' type="object"
