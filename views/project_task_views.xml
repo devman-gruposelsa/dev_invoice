@@ -24,10 +24,10 @@
           </field>
       </record>
 
-      <record model="ir.ui.view" id="custom_project_task_form_view_inherit">
+      <record model="ir.ui.view" id="dev_invoice_project_task_form_view_inherit">
         <field name="name">custom.project.form.view.inherit</field>
         <field name="model">project.task</field>
-        <field name="inherit_id" ref="dev_insurances.custom_project_task_form_view"/>
+        <field name="inherit_id" ref="dev_insurances.custom_project_task_form_view_2"/>
         <field name="arch" type="xml">
             <!-- Añadir el campo transit_total_cost después de zfe -->
             <xpath expr="//field[@name='zfe']" position="after">
