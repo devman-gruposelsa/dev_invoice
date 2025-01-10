@@ -10,6 +10,19 @@ _logger = logging.getLogger(__name__)
 class ProjectTask(models.Model):
     _inherit = 'project.task'
 
+    transit_total_cost = fields.Float(
+        string='Total Transit Cost',
+        compute='_compute_transit_total_cost',
+        store=True,
+        help="Sum of the untaxed amounts of all filtered invoices associated with this task."
+    )
+
+    @api.depends('invoice_ids_filtered')
+    def _compute_transit_total_cost(self):
+        for task in self:
+            task.transit_total_cost = sum(invoice.amount_untaxed_signed for invoice in task.invoice_ids_filtered)
+
+
     def action_create_income_invoice(self):
         self._create_sale_order('income_invoice_pack')
 
