@@ -27,14 +27,14 @@ class ProjectTask(models.Model):
     help="Facturas asociadas a esta tarea."
     )
 
-    @api.depends('invoice_ids')
+    @api.depends('invoice_ids_2')
     def _compute_invoice_ids_filtered(self):
         """
         Filtra las facturas relevantes asociadas a esta tarea.
         """
         for task in self:
-            task.invoice_ids_filtered_2 = [(6, 0, task.invoice_ids.ids)]
-            _logger.info("Task: %s | Filtered Invoices: %s", task.id, task.invoice_ids.ids)
+            task.invoice_ids_filtered_2 = [(6, 0, task.invoice_ids_2.ids)]
+            _logger.info("Task: %s | Filtered Invoices: %s", task.id, task.invoice_ids_2.ids)
 
 
     @api.depends('invoice_ids_filtered_2.amount_untaxed_signed')
