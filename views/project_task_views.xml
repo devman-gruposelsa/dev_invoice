@@ -24,10 +24,10 @@
           </field>
       </record>
 
-      <record model="ir.ui.view" id="view_task_form2_inherit">
-        <field name="name">related.documents.form</field>
+      <record model="ir.ui.view" id="related_documents_form_view_inherit">
+        <field name="name">related.documents.form.inherit</field>
         <field name="model">project.task</field>
-        <field name="inherit_id" ref="project.view_task_form2"/>
+        <field name="inherit_id" ref="import_folder_016.related_documents_form_view"/>
         <field name="arch" type="xml">
             <!-- Añadir el campo transit_total_cost después de discharge_invoice_check -->
             <xpath expr="//field[@name='discharge_invoice_check']" position="after">
