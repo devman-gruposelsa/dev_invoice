@@ -20,7 +20,9 @@ class ProjectTask(models.Model):
     @api.depends('sale_order_ids.task_id')
     def _compute_transit_total_cost(self):
         for task in self:
-            task.transit_total_cost = sum(invoice.amount_untaxed_signed for invoice in task.invoice_ids_filtered)
+            total_cost = sum(invoice.amount_untaxed_signed for invoice in task.invoice_ids_filtered)
+            task.transit_total_cost = total_cost
+            _logger.info("Task: %s | Transit Total Cost: %s", task.id, total_cost)
 
 
     def action_create_income_invoice(self):
