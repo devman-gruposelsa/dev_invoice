@@ -18,27 +18,29 @@ class ProjectTask(models.Model):
     )
 
     invoice_ids_filtered_2 = fields.Many2many(
-        comodel_name='account.move',
-        relation='task_account_move_rel',
-        column1='task_id',
-        column2='move_id',
-        string='Facturas proveedor',
-        compute='_compute_invoice_ids_filtered',
-        store=True,
-        help="Facturas asociadas a esta tarea"
+    comodel_name='account.move',
+    compute='_compute_invoice_ids_filtered',
+    store=True,
+    string='Facturas proveedor filtradas',
+    help="Facturas asociadas a esta tarea."
     )
 
-    @api.depends('sale_order_ids.task_id')
+    @api.depends('invoice_ids')
     def _compute_invoice_ids_filtered(self):
+        """
+        Filtra las facturas relevantes asociadas a esta tarea.
+        """
         for task in self:
-            # Filtrar facturas que tienen relación con la tarea
-            invoices = self.env['account.move'].search([('task_id', '=', task.id)])
-            task.invoice_ids_filtered = [(6, 0, invoices.ids)]
-            _logger.info("Task: %s | Filtered Invoices: %s", task.id, invoices.ids)
+            task.invoice_ids_filtered_2 = [(6, 0, task.invoice_ids.ids)]
+            _logger.info("Task: %s | Filtered Invoices: %s", task.id, task.invoice_ids.ids)
 
 
-    @api.depends('sale_order_ids.task_id')
+    @api.depends('invoice_ids_filtered.amount_untaxed_signed')
     def _compute_transit_total_cost(self):
+        """
+        Calcula el costo total de tránsito sumando `amount_untaxed_signed`
+        de las facturas asociadas.
+        """
         for task in self:
             total_cost = sum(invoice.amount_untaxed_signed for invoice in task.invoice_ids_filtered_2)
             task.transit_total_cost = total_cost
