@@ -17,10 +17,30 @@ class ProjectTask(models.Model):
         help="Sum of the untaxed amounts of all filtered invoices associated with this task."
     )
 
+    invoice_ids_filtered_2 = fields.Many2many(
+        comodel_name='account.move',
+        relation='task_account_move_rel',
+        column1='task_id',
+        column2='move_id',
+        string='Facturas proveedor',
+        compute='_compute_invoice_ids_filtered',
+        store=True,
+        help="Facturas asociadas a esta tarea"
+    )
+
+    @api.depends('sale_order_ids.task_id')
+    def _compute_invoice_ids_filtered(self):
+        for task in self:
+            # Filtrar facturas que tienen relación con la tarea
+            invoices = self.env['account.move'].search([('task_id', '=', task.id)])
+            task.invoice_ids_filtered = [(6, 0, invoices.ids)]
+            _logger.info("Task: %s | Filtered Invoices: %s", task.id, invoices.ids)
+
+
     @api.depends('sale_order_ids.task_id')
     def _compute_transit_total_cost(self):
         for task in self:
-            total_cost = sum(invoice.amount_untaxed_signed for invoice in task.invoice_ids_filtered)
+            total_cost = sum(invoice.amount_untaxed_signed for invoice in task.invoice_ids_filtered_2)
             task.transit_total_cost = total_cost
             _logger.info("Task: %s | Transit Total Cost: %s", task.id, total_cost)
 
