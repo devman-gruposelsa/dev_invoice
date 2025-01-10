@@ -17,6 +17,8 @@ class ProjectTask(models.Model):
         help="Sum of the untaxed amounts of all filtered invoices associated with this task."
     )
 
+    invoice_ids_2 = fields.One2many('account.move','task_id', string='Facturas proveedor')
+
     invoice_ids_filtered_2 = fields.Many2many(
     comodel_name='account.move',
     compute='_compute_invoice_ids_filtered',
