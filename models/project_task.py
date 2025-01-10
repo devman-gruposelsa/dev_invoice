@@ -35,7 +35,7 @@ class ProjectTask(models.Model):
             _logger.info("Task: %s | Filtered Invoices: %s", task.id, task.invoice_ids.ids)
 
 
-    @api.depends('invoice_ids_filtered.amount_untaxed_signed')
+    @api.depends('invoice_ids_filtered_2.amount_untaxed_signed')
     def _compute_transit_total_cost(self):
         """
         Calcula el costo total de tránsito sumando `amount_untaxed_signed`
