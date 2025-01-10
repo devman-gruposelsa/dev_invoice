@@ -17,19 +17,30 @@ class ProjectTask(models.Model):
         help="Sum of the untaxed amounts of all filtered invoices associated with this task."
     )
 
-    @api.onchange('purchase_order_ids.task_id', 'invoice_ids_filtered.amount_untaxed_signed')
+    @api.depends('purchase_order_ids.task_id', 'invoice_ids_filtered.amount_untaxed_signed')
     def _compute_transit_total_cost(self):
         for rec in self:
+            # Inicializa una lista para almacenar facturas filtradas
             invoices_filtered = []
-            invoices= self.env['account.move'].search([])
+            
+            # Busca todas las facturas (esto podría optimizarse si se conoce el rango necesario)
+            invoices = self.env['account.move'].search([])
+            _logger.info("Todas las facturas: %s", invoices.ids)
+
+            # Filtra las facturas relacionadas con esta tarea
             for record in invoices:
                 if record.task_id:
                     for task in record.task_id:
-                        _logger.info("record.task_id %s", task)
+                        _logger.info("Factura: %s relacionada con tarea: %s", record.id, task.id)
                         if task.id == rec.id:
-                            invoices_filtered.append(record.id)
-            rec.transit_total_cost = sum(invoices_filtered.amount_untaxed_signed)
-            _logger.info("invoices_filtered %s", invoices_filtered)
+                            invoices_filtered.append(record)
+            
+            # Calcula el costo total de las facturas filtradas
+            rec.transit_total_cost = sum(invoice.amount_untaxed_signed for invoice in invoices_filtered)
+
+            # Registra la información para depuración
+            _logger.info("Tarea: %s | Facturas filtradas: %s", rec.id, [inv.id for inv in invoices_filtered])
+            _logger.info("Tarea: %s | Transit Total Cost: %s", rec.id, rec.transit_total_cost)
 
 
     def action_create_income_invoice(self):
