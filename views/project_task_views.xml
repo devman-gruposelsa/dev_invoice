@@ -23,5 +23,25 @@
             </xpath>
           </field>
       </record>
+
+      <record model="ir.ui.view" id="view_task_form2_inherit">
+        <field name="name">related.documents.form</field>
+        <field name="model">project.task</field>
+        <field name="inherit_id" ref="project.view_task_form2"/>
+        <field name="arch" type="xml">
+            <!-- Añadir el campo transit_total_cost después de discharge_invoice_check -->
+            <xpath expr="//form[1]/sheet[1]/group[1]/group[2]/field[@name='discharge_invoice_check'][2]" position="after">
+                <field name="transit_total_cost" string="Transit Total Cost" widget="monetary" options="{'currency_field': 'company_currency_id'}"/>
+		            <div class="oe_button_box" name="button_box_co" style="width: auto;">
+                    <button name='costo_total_transito' type="object"
+                            string="Actualizar Costo total del transito"
+                            title="Actualizar costo total del transito"
+                            class="oe_stat_button"
+                            icon="fa-pencil-square-o"/>
+                </div>
+            </xpath>
+        </field>
+      </record>
+
     </data>
   </odoo>

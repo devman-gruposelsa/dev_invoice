@@ -17,6 +17,10 @@ class ProjectTask(models.Model):
         help="Sum of the untaxed amounts of all filtered invoices associated with this task."
     )
 
+    def costo_total_transito(self):
+        for rec in self:
+            rec._compute_transit_total_cost()
+
     #@api.depends('invoice_ids_filtered.amount_untaxed_signed')
     def _compute_transit_total_cost(self):
         for rec in self:
