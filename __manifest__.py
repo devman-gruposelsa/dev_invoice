@@ -6,7 +6,7 @@
     'author': '',
     'website': '',
     'category': '',
-    'depends': ['base', 'product', 'sale', 'project'],
+    'depends': ['base', 'product', 'sale', 'project', 'import_folder_016'],
     "data": [
         "views/project_task_views.xml",
         "views/product_template_views.xml",
