@@ -43,5 +43,23 @@
         </field>
       </record>
 
+      <record model="ir.ui.view" id="custom_project_task_form_view_1">
+        <field name="name">custom.project.task.form.view</field>
+        <field name="model">project.task</field>
+        <field name="inherit_id" ref="project.view_task_form2"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form/header/button[@name='action_assign_to_me']" position="after">
+                <button string="Calcular totales" help="Recalcula los valores totales de cantidad, peso, volumen y fob." type="object" name="compute_totales_logisticos"/>
+            </xpath>
+            <xpath expr="//form[1]/sheet[1]/notebook[1]" position="inside">
+                <page string="Facturas relacionadas" name="invoice_related">
+                  <group name="facturas">
+                    <field name="invoice_ids_filtered" string="Facturas"/>
+                  </group>
+                </page>
+            </xpath>
+        </field>
+      </record>
+
     </data>
   </odoo>
