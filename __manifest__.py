@@ -6,10 +6,11 @@
     'author': '',
     'website': '',
     'category': '',
-    'depends': ['base', 'product', 'sale', 'project', 'import_folder_016', 'dev_insurances'],
+    'depends': ['base', 'product', 'sale', 'project', 'import_folder_016', 'dev_insurances', 'exe_selsa_commission'],
     "data": [
         "views/project_task_views.xml",
         "views/product_template_views.xml",
+        "views/res_partner_views.xml",
         "data/project_task_data.xml"
     ],
     'application': True,

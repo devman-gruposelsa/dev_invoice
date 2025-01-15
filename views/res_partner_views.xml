@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+  <odoo>
+      
+    <!-- View product.template form -->
+    <record id="custom_res_partner_form_view" model="ir.ui.view">
+        <field name="name">res.partner.form.view.custom</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="exe_selsa_commission.view_partner_form_client_boolean" />
+        <field name="arch" type="xml">
+          <field name="is_client" position="before">
+            <field name="monthly_invoice" string="Unica factura mensual"/>
+          </field>
+        </field>
+    </record>
+
+  </odoo>
+
+  

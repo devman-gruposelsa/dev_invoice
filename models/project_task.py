@@ -11,7 +11,7 @@ class ProjectTask(models.Model):
     _inherit = 'project.task'
 
     transit_total_cost = fields.Float(
-        string='Total Transit Cost',
+        string='Costo total del transito',
         compute='_compute_transit_total_cost',
         store=True,
         help="Sum of the untaxed amounts of all filtered invoices associated with this task."
@@ -48,57 +48,205 @@ class ProjectTask(models.Model):
 
 
     def action_create_income_invoice(self):
-        self._create_sale_order('income_invoice_pack')
+        self._create_invoice('income_invoice_pack')
 
     def action_create_outcome_invoice(self):
-        self._create_sale_order('outcome_invoice_pack')
+        self._create_invoice('outcome_invoice_pack')
 
-    def _create_sale_order(self, product_pack_field):
-        sale_order_obj = self.env['sale.order']
-        sale_order_line_obj = self.env['sale.order.line']
-        
+    def _create_invoice(self, product_pack_field):
+        account_move_obj = self.env['account.move']
+        account_move_line_obj = self.env['account.move.line']
+
         for task in self:
+            # Buscar productos asociados al campo específico
             products = self.env['product.product'].search([('product_tmpl_id.' + product_pack_field, '=', True)])
             if not products:
                 raise ValidationError('No hay productos configurados con el paquete solicitado.')
 
-            sale_order = sale_order_obj.create({
+            # Crear la factura (account.move) y relacionarla con la tarea
+            invoice = account_move_obj.create({
                 'partner_id': task.partner_id.id,
-                'task_ids': [(4, task.id)],
+                'move_type': 'out_invoice',  # Factura de cliente
+                'invoice_origin': task.name,
+                'task_id': [(4, task.id)],  # Relación Many2many con la tarea
+                'invoice_line_ids': [],
             })
 
+            # Agregar líneas de factura
             for product in products:
-                sale_order_line_obj.create({
-                    'order_id': sale_order.id,
+                account_move_line_obj.create({
+                    'move_id': invoice.id,
                     'product_id': product.id,
-                    'product_uom_qty': 1,  # Ajusta según necesidad
+                    'quantity': 1,  # Ajusta según sea necesario
+                    'price_unit': product.lst_price,
+                    'name': product.name,
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
                 })
 
     def action_create_storage_invoice(self):
-        sale_order_obj = self.env['sale.order']
-        sale_order_line_obj = self.env['sale.order.line']
+        account_move_obj = self.env['account.move']
+        account_move_line_obj = self.env['account.move.line']
 
         for task in self:
+            # Buscar productos con el paquete de facturación de almacenamiento
             products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
             if not products:
                 raise ValidationError('No hay productos configurados para facturación de almacenamiento.')
 
-            sale_order = sale_order_obj.create({
+            # Crear la factura (account.move) y relacionarla con la tarea
+            invoice = account_move_obj.create({
                 'partner_id': task.partner_id.id,
-                'task_ids': [(4, task.id)],
+                'move_type': 'out_invoice',  # Factura de cliente
+                'invoice_origin': task.name,
+                'task_id': [(4, task.id)],  # Relación Many2many con la tarea
+                'invoice_line_ids': [],
             })
 
+            # Agregar líneas de factura con el volumen total del stock
             for product in products:
-                sale_order_line_obj.create({
-                    'order_id': sale_order.id,
+                account_move_line_obj.create({
+                    'move_id': invoice.id,
                     'product_id': product.id,
-                    'product_uom_qty': task.volumen_total_stock,
+                    'quantity': task.volumen_total_stock,
+                    'price_unit': product.lst_price,
+                    'name': product.name,
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
                 })
 
     def _cron_generate_storage_invoices(self):
-        
         tasks = self.env['project.task'].search([('stage_id.transito_cerrado', '=', False)])
+        grouped_invoices = {}  # Almacena las tareas agrupadas por cliente
 
         for task in tasks:
-            task.action_create_storage_invoice()
+            if task.egreso_completo:
+                # Ignorar la tarea si tiene egreso_completo=True
+                continue
+
+            partner = task.partner_id
+
+            if partner.monthly_invoice:
+                if partner.id not in grouped_invoices:
+                    grouped_invoices[partner.id] = []
+                grouped_invoices[partner.id].append(task)
+            else:
+                # Crear factura individual por tarea
+                self._create_single_task_invoice(task)
+
+        # Crear facturas agrupadas por cliente
+        for partner_id, task_list in grouped_invoices.items():
+            partner = self.env['res.partner'].browse(partner_id)
+            account_move_obj = self.env['account.move']
+            account_move_line_obj = self.env['account.move.line']
+
+            # Filtrar tareas con egreso_completo=True y continuar solo con las válidas
+            valid_tasks = [task for task in task_list if not task.egreso_completo]
+            if not valid_tasks:
+                continue  # Si no hay tareas válidas, pasar al siguiente cliente
+
+            # Crear la factura agrupada y asociarla a las tareas válidas
+            invoice = account_move_obj.create({
+                'partner_id': partner.id,
+                'move_type': 'out_invoice',
+                'invoice_origin': ', '.join([task.name for task in valid_tasks]),
+                'task_id': [(4, task.id) for task in valid_tasks],  # Relación Many2many con tareas
+                'invoice_line_ids': [],
+            })
+
+            # Agregar líneas de factura de cada tarea válida
+            for task in valid_tasks:
+                products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
+                for product in products:
+                    account_move_line_obj.create({
+                        'move_id': invoice.id,
+                        'product_id': product.id,
+                        'quantity': task.volumen_total_stock,
+                        'price_unit': product.lst_price,
+                        'name': f"{task.name} - {product.name}",
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                    })
+
+    def _create_single_task_invoice(self, task):
+        """Crear una factura individual para una tarea específica."""
+        account_move_obj = self.env['account.move']
+        account_move_line_obj = self.env['account.move.line']
+
+        # Buscar productos con el paquete de facturación de almacenamiento
+        products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
+        if not products:
+            raise ValidationError('No hay productos configurados para facturación de almacenamiento.')
+
+        # Crear la factura y relacionarla con la tarea
+        invoice = account_move_obj.create({
+            'partner_id': task.partner_id.id,
+            'move_type': 'out_invoice',
+            'invoice_origin': task.name,
+            'task_id': [(4, task.id)],  # Relación Many2many con la tarea
+            'invoice_line_ids': [],
+        })
+
+        # Agregar líneas de factura
+        for product in products:
+            account_move_line_obj.create({
+                'move_id': invoice.id,
+                'product_id': product.id,
+                'quantity': task.volumen_total_stock,
+                'price_unit': product.lst_price,
+                'name': f"{task.name} - {product.name}",
+                'account_id': product.categ_id.property_account_income_categ_id.id,
+            })
+    
+    
+    def action_generate_monthly_invoices(self):
+        grouped_invoices = {}  # Almacena las tareas agrupadas por cliente
+        invalid_tasks = []  # Tareas con egreso_completo=True
+
+        for task in self:
+            if task.egreso_completo:
+                # Agregar a la lista de tareas inválidas
+                invalid_tasks.append(task)
+                continue
+
+            partner = task.partner_id
+
+            if partner.monthly_invoice:
+                if partner.id not in grouped_invoices:
+                    grouped_invoices[partner.id] = []
+                grouped_invoices[partner.id].append(task)
+            else:
+                # Crear factura individual por tarea
+                self._create_single_task_invoice(task)
+
+        # Levantar una alerta si hay tareas inválidas
+        if invalid_tasks:
+            task_names = ', '.join([task.name for task in invalid_tasks])
+            raise ValidationError(f"Las siguientes tareas tienen 'Egreso Completo' en True y no se incluyeron: {task_names}")
+
+        # Crear facturas agrupadas por cliente
+        for partner_id, task_list in grouped_invoices.items():
+            partner = self.env['res.partner'].browse(partner_id)
+            account_move_obj = self.env['account.move']
+            account_move_line_obj = self.env['account.move.line']
+
+            # Crear la factura agrupada y asociarla a todas las tareas válidas
+            invoice = account_move_obj.create({
+                'partner_id': partner.id,
+                'move_type': 'out_invoice',
+                'invoice_origin': ', '.join([task.name for task in task_list]),
+                'task_id': [(4, task.id) for task in task_list],  # Relación Many2many con tareas
+                'invoice_line_ids': [],
+            })
+
+            # Agregar líneas de factura de cada tarea
+            for task in task_list:
+                products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
+                for product in products:
+                    account_move_line_obj.create({
+                        'move_id': invoice.id,
+                        'product_id': product.id,
+                        'quantity': task.volumen_total_stock,
+                        'price_unit': product.lst_price,
+                        'name': f"{task.name} - {product.name}",
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                    })
+
         
