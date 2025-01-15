@@ -61,16 +61,5 @@
             </xpath>
         </field>
       </record>
-
-      <record id="action_generate_monthly_invoices" model="ir.actions.server">
-        <field name="name">Generar Facturas Mensuales</field>
-        <field name="model_id" ref="project.model_project_task"/>
-        <field name="state">code</field>
-        <field name="code">
-            for task in env['project.task'].browse(context.get('active_ids', [])):
-                task.action_generate_monthly_invoices()
-        </field>
-      </record>
-
     </data>
   </odoo>

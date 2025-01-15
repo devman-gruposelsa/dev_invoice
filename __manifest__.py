@@ -11,6 +11,7 @@
         "views/project_task_views.xml",
         "views/product_template_views.xml",
         "views/res_partner_views.xml",
+        "data/ir_action_data.xml",
         "data/project_task_data.xml"
     ],
     'application': True,

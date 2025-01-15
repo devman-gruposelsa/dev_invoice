@@ -193,9 +193,9 @@ class ProjectTask(models.Model):
         # Buscar productos con el paquete de facturación de almacenamiento
         products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
         if not products:
-            raise ValidationError('No hay productos configurados para facturación de almacenamiento.')
+            raise ValidationError(f"No hay productos configurados para facturación de almacenamiento para la tarea {task.name}.")
 
-        # Crear la factura
+        # Crear la factura para la tarea
         invoice = account_move_obj.create({
             'partner_id': task.partner_id.id,
             'move_type': 'out_invoice',
@@ -204,7 +204,7 @@ class ProjectTask(models.Model):
 
         _logger.info(f"Factura creada con ID: {invoice.id} para la tarea {task.name} (ID: {task.id})")
 
-        # Agregar líneas de factura
+        # Agregar líneas de factura: Iterar sobre los productos asociados a la tarea
         for product in products:
             account_move_line_obj.create({
                 'move_id': invoice.id,
@@ -218,45 +218,60 @@ class ProjectTask(models.Model):
 
         _logger.info(f"Tareas relacionadas con la factura {invoice.id}: {invoice.task_id.ids}")
 
-    
-    
-    def action_generate_monthly_invoices(self):
-        grouped_invoices = {}
-        invalid_tasks = []
 
+    def action_generate_monthly_invoices(self):
+        grouped_invoices = {}  # Diccionario para agrupar tareas por cliente
+        invalid_tasks = []  # Lista para tareas con egreso_completo=True
+
+        _logger.info("Iniciando el proceso de generación de facturas mensuales...")
+
+        # Agrupar tareas por cliente
         for task in self:
+            _logger.info(f"Procesando la tarea: {task.name} (ID: {task.id}), Cliente: {task.partner_id.name}")
+
+            # Validar si la tarea tiene egreso_completo=True
             if task.egreso_completo:
+                _logger.warning(f"Tarea {task.name} (ID: {task.id}) tiene egreso_completo=True, será ignorada.")
                 invalid_tasks.append(task)
                 continue
 
+            # Agrupar tareas según el cliente
             partner = task.partner_id
-
             if partner.monthly_invoice:
                 if partner.id not in grouped_invoices:
-                    grouped_invoices[partner.id] = []
-                grouped_invoices[partner.id].append(task)
+                    grouped_invoices[partner.id] = []  # Crear una lista para este cliente
+                grouped_invoices[partner.id].append(task)  # Agregar la tarea a la lista del cliente
+                _logger.info(f"Tarea {task.name} (ID: {task.id}) agrupada bajo el cliente {partner.name} (ID: {partner.id}).")
             else:
+                _logger.info(f"Tarea {task.name} (ID: {task.id}) será facturada individualmente.")
                 self._create_single_task_invoice(task)
 
+        # Mostrar tareas ignoradas por egreso_completo=True
         if invalid_tasks:
             task_names = ', '.join([task.name for task in invalid_tasks])
-            raise ValidationError(f"Las siguientes tareas tienen 'Egreso Completo' en True: {task_names}")
+            _logger.warning(f"Las siguientes tareas tienen 'Egreso Completo' en True y no se facturarán: {task_names}")
 
+        # Crear facturas agrupadas por cliente
         for partner_id, task_list in grouped_invoices.items():
             partner = self.env['res.partner'].browse(partner_id)
+            _logger.info(f"Creando una factura agrupada para el cliente {partner.name} (ID: {partner.id}) con las tareas: {', '.join([task.name for task in task_list])}.")
+
+            # Crear la factura agrupada
             account_move_obj = self.env['account.move']
             account_move_line_obj = self.env['account.move.line']
-
             invoice = account_move_obj.create({
                 'partner_id': partner.id,
                 'move_type': 'out_invoice',
                 'invoice_origin': ', '.join([task.name for task in task_list]),
             })
+            _logger.info(f"Factura agrupada creada con ID: {invoice.id} para el cliente {partner.name}.")
 
-            _logger.info(f"Factura agrupada creada con ID: {invoice.id} para el cliente {partner.name}")
-
+            # Agregar líneas de factura para cada tarea
             for task in task_list:
                 products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
+                if not products:
+                    raise ValidationError(f"No hay productos configurados para la tarea {task.name}.")
+
                 for product in products:
                     account_move_line_obj.create({
                         'move_id': invoice.id,
@@ -267,7 +282,8 @@ class ProjectTask(models.Model):
                         'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
                     })
+                    _logger.info(f"Línea de factura creada para la tarea {task.name} (ID: {task.id}) con el producto {product.name}.")
 
-            _logger.info(f"Tareas relacionadas con la factura {invoice.id}: {invoice.task_id.ids}")
+            _logger.info(f"Finalizada la creación de líneas para la factura {invoice.id}. Tareas relacionadas: {invoice.task_id.ids}.")
 
         

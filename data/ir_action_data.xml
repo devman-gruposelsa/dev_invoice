@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Server action to print sale order excel report-->
+        <record id="action_generate_monthly_invoices" model="ir.actions.server">
+            <field name="name">Generar Facturas Mensuales</field>
+            <field name="model_id" ref="project.model_project_task"/>
+            <field name="binding_model_id" ref="project.model_project_task"/>
+            <field name="binding_view_types">list</field>
+            <field name="state">code</field>
+            <field name="code">
+                env['project.task'].browse(env.context.get('active_ids', [])).action_generate_monthly_invoices()
+            </field>
+        </record>
+    </data>
+</odoo>
