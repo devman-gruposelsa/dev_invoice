@@ -43,9 +43,22 @@
                         icon="fa-pencil-square-o"/>
                   <!--</div>-->
               </div>
+              <field name="date_next_billing"/>
             </xpath>
         </field>
       </record>
+
+      <record model="ir.ui.view" id="custom_project_task_form_view_invoice">
+            <field name="name">custom.project.task.form.view.invoice</field>
+            <field name="model">project.task</field>
+            <field name="inherit_id" ref="dev_insurances.custom_project_task_form_view_2"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='days_storage']" position="after">
+                    <field name="days_invoiced" attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                    <field name="full_transit" attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                </xpath>
+            </field>
+        </record>
 
       <record model="ir.ui.view" id="custom_project_task_form_view_1">
         <field name="name">custom.project.task.form.view</field>

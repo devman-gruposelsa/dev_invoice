@@ -17,6 +17,12 @@ class ProjectTask(models.Model):
         help="Sum of the untaxed amounts of all filtered invoices associated with this task."
     )
 
+    date_next_billing = fields.Date(string="Fecha de proxima facturación mensual", help="Corresponde a la fecha en la cual desea que se realice la facturación mensual, la misma aumentara en dias")
+    days_invoiced = fields.Integer(string="Días de Almacenamiento Facturado", compute="_compute_days_storage_invoiced", store=True)
+
+    full_transit = fields.Boolean(string="Tránsito Completo", help="Indica si el tránsito está completo y listo para facturar.", store=True)
+
+
     def costo_total_transito(self):
         for rec in self:
             rec._compute_transit_total_cost()
@@ -45,6 +51,9 @@ class ProjectTask(models.Model):
             # Registra la información para depuración
             _logger.info("Tarea: %s | Facturas filtradas: %s", rec.id, [inv.id for inv in invoices_filtered])
             _logger.info("Tarea: %s | Transit Total Cost: %s", rec.id, rec.transit_total_cost)
+
+    def _compute_days_storage_invoiced(self):
+        pass
 
 
     def _create_invoice(self, product_pack_field):
@@ -81,10 +90,16 @@ class ProjectTask(models.Model):
                     'task_id': task.id,  # Relación con la tarea
                 })
                 _logger.info(f"Línea de factura creada con ID: {line.id}, relacionada con la tarea {task.name} (ID: {task.id})")
+            
+            try:
+                invoice.button_update_prices_from_pricelist()
+            except Exception as e:
+                _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
 
             # Verificar si las líneas tienen el task_id asignado
-            for line in invoice.invoice_line_ids:
-                _logger.info(f"Línea de factura {line.id} asociada a la tarea {line.task_id.id if line.task_id else 'No asignada'}")
+            #for line in invoice.invoice_line_ids:
+            #    _logger.info(f"Línea de factura {line.id} asociada a la tarea {line.task_id.id if line.task_id else 'No asignada'}")
+
 
     def action_create_income_invoice(self):
         _logger.info("Generando facturas de ingreso...")
@@ -124,12 +139,17 @@ class ProjectTask(models.Model):
                     'product_id': product.id,
                     'quantity': task.volumen_total_stock,  # Usa el volumen total del stock
                     'price_unit': product.lst_price,
-                    'name': product.name,
+                    'name': f"{product.name} - {task.name}",
                     'account_id': product.categ_id.property_account_income_categ_id.id,
                     'task_id': task.id,  # Relación directa con la tarea
                 })
 
             _logger.info(f"Tareas relacionadas con la factura {invoice.id}: {invoice.task_id.ids}")
+
+            try:
+                invoice.button_update_prices_from_pricelist()
+            except Exception as e:
+                _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
 
 
     def _cron_generate_storage_invoices(self):
@@ -175,12 +195,17 @@ class ProjectTask(models.Model):
                         'product_id': product.id,
                         'quantity': task.volumen_total_stock,
                         'price_unit': product.lst_price,
-                        'name': f"{task.name} - {product.name}",
+                        'name': f"{product.name} - {task.name}",
                         'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,  # Relación con la tarea
                     })
 
             _logger.info(f"Tareas relacionadas con la factura {invoice.id}: {invoice.task_id.ids}")
+
+            try:
+                invoice.button_update_prices_from_pricelist()
+            except Exception as e:
+                _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
 
     def _create_single_task_invoice(self, task):
         account_move_obj = self.env['account.move']
@@ -211,52 +236,49 @@ class ProjectTask(models.Model):
                 'product_id': product.id,
                 'quantity': task.volumen_total_stock,
                 'price_unit': product.lst_price,
-                'name': f"{task.name} - {product.name}",
+                'name': f"{product.name} - {task.name}",
                 'account_id': product.categ_id.property_account_income_categ_id.id,
                 'task_id': task.id,  # Relación directa con la tarea
             })
+
+        # **Actualizar los precios de las líneas según la lista de precios**
+        try:
+            invoice.button_update_prices_from_pricelist()  # Llamar al método
+            _logger.info(f"Precios actualizados en la factura {invoice.id} según la lista de precios del cliente {task.partner_id.name}.")
+        except Exception as e:
+            _logger.error(f"Error al actualizar los precios para la factura {invoice.id}: {str(e)}")
 
         _logger.info(f"Tareas relacionadas con la factura {invoice.id}: {invoice.task_id.ids}")
 
 
     def action_generate_monthly_invoices(self):
-        grouped_invoices = {}  # Diccionario para agrupar tareas por cliente
-        invalid_tasks = []  # Lista para tareas con egreso_completo=True
+        grouped_invoices = {}
+        invalid_tasks = []
 
         _logger.info("Iniciando el proceso de generación de facturas mensuales...")
 
         # Agrupar tareas por cliente
         for task in self:
-            _logger.info(f"Procesando la tarea: {task.name} (ID: {task.id}), Cliente: {task.partner_id.name}")
-
-            # Validar si la tarea tiene egreso_completo=True
             if task.egreso_completo:
-                _logger.warning(f"Tarea {task.name} (ID: {task.id}) tiene egreso_completo=True, será ignorada.")
                 invalid_tasks.append(task)
                 continue
 
-            # Agrupar tareas según el cliente
             partner = task.partner_id
             if partner.monthly_invoice:
                 if partner.id not in grouped_invoices:
-                    grouped_invoices[partner.id] = []  # Crear una lista para este cliente
-                grouped_invoices[partner.id].append(task)  # Agregar la tarea a la lista del cliente
-                _logger.info(f"Tarea {task.name} (ID: {task.id}) agrupada bajo el cliente {partner.name} (ID: {partner.id}).")
+                    grouped_invoices[partner.id] = []
+                grouped_invoices[partner.id].append(task)
             else:
-                _logger.info(f"Tarea {task.name} (ID: {task.id}) será facturada individualmente.")
-                self._create_single_task_invoice(task)
+                # Crear factura individual y agregar a la lista
+                invoice = self._create_single_task_invoice(task)
 
-        # Mostrar tareas ignoradas por egreso_completo=True
         if invalid_tasks:
             task_names = ', '.join([task.name for task in invalid_tasks])
-            _logger.warning(f"Las siguientes tareas tienen 'Egreso Completo' en True y no se facturarán: {task_names}")
+            raise ValidationError(f"Las siguientes tareas tienen 'Egreso Completo' en True y no se facturarán: {task_names}")
 
         # Crear facturas agrupadas por cliente
         for partner_id, task_list in grouped_invoices.items():
             partner = self.env['res.partner'].browse(partner_id)
-            _logger.info(f"Creando una factura agrupada para el cliente {partner.name} (ID: {partner.id}) con las tareas: {', '.join([task.name for task in task_list])}.")
-
-            # Crear la factura agrupada
             account_move_obj = self.env['account.move']
             account_move_line_obj = self.env['account.move.line']
             invoice = account_move_obj.create({
@@ -264,26 +286,26 @@ class ProjectTask(models.Model):
                 'move_type': 'out_invoice',
                 'invoice_origin': ', '.join([task.name for task in task_list]),
             })
-            _logger.info(f"Factura agrupada creada con ID: {invoice.id} para el cliente {partner.name}.")
 
-            # Agregar líneas de factura para cada tarea
+            # Crear líneas de factura
             for task in task_list:
                 products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
-                if not products:
-                    raise ValidationError(f"No hay productos configurados para la tarea {task.name}.")
-
                 for product in products:
                     account_move_line_obj.create({
                         'move_id': invoice.id,
                         'product_id': product.id,
                         'quantity': task.volumen_total_stock,
                         'price_unit': product.lst_price,
-                        'name': f"{task.name} - {product.name}",
+                        'name': f"{product.name} - {task.name}",
                         'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
                     })
-                    _logger.info(f"Línea de factura creada para la tarea {task.name} (ID: {task.id}) con el producto {product.name}.")
 
-            _logger.info(f"Finalizada la creación de líneas para la factura {invoice.id}. Tareas relacionadas: {invoice.task_id.ids}.")
+            try:
+                invoice.button_update_prices_from_pricelist()
+            except Exception as e:
+                _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
 
         
+
+

@@ -1,0 +1,15 @@
+<odoo>
+    <data>
+      <record id="dev_invoice_sale_order_custom" model="ir.ui.view">
+        <field name="name">dev.invoice.sale.order.custom</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/> <!-- Referencia a la vista original de sale.order -->
+        <field name="arch" type="xml">
+          <!-- Agregar el botón en el encabezado del formulario -->
+          <xpath expr="//form/header" position="inside">
+            <button name="action_create_outcome_invoice" type="object" string="Crear factura saliente" class="oe_highlight"/>
+          </xpath>
+        </field>
+      </record>
+    </data>
+</odoo>

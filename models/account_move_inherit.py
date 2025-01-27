@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import models, fields
+from odoo import models, fields, api
 
 import logging
 
@@ -24,3 +24,9 @@ class AccountMoveInherit(models.Model):
                         _logger.info(f"Orden de venta {line.sale_id.id} asociada a la tarea {task.id}")
             rec.task_id = [(6, 0, task_ids)]
             _logger.info(f"Tareas calculadas para factura {rec.id}: {task_ids}")
+
+    def unlink(self):
+        sale_orders = self.mapped('line_ids.sale_id')
+        res = super(AccountMoveInherit, self).unlink()
+        sale_orders._compute_invoice_status()
+        return res

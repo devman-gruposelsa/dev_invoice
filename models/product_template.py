@@ -12,3 +12,7 @@ class ProductTemplate(models.Model):
     income_invoice_pack = fields.Boolean(string='Factura de ingreso')
     outcome_invoice_pack = fields.Boolean(string='Factura de Egreso')
     stock_invoice_pack = fields.Boolean(string='Factura de Almacenamiento')
+
+    product_full_transit = fields.Boolean(string='Usar en tránsito completo')
+
+    one_line_invoice = fields.Boolean(string='Unificar en una sola línea')

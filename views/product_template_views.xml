@@ -5,13 +5,19 @@
     <record id="view_product_template_form" model="ir.ui.view">
         <field name="name">product.template.product.form</field>
         <field name="model">product.template</field>
-        <field name="inherit_id" ref="product.product_template_form_view" />
+        <field name="inherit_id" ref="product.product_template_only_form_view" />
         <field name="arch" type="xml">
-          <field name="sale_ok" position="before">
-            <field name="income_invoice_pack" string="Factura Ingreso" placeholder="Factura de ingreso" />
-            <field name="outcome_invoice_pack" string="Factura Egreso" placeholder="Factura de egreso" />
-            <field name="stock_invoice_pack" string="Factura Almacenamiento" placeholder="Factura de Almacenamiento" />
-          </field>
+          <xpath expr="//page[@name='variants']" position="after">
+              <page string="Facturación">
+                  <group string="Configuración de Facturación" colspan="4">
+                      <field name="income_invoice_pack" string="Factura Ingreso" placeholder="Factura de ingreso" />
+                      <field name="outcome_invoice_pack" string="Factura Egreso" placeholder="Factura de egreso" />
+                      <field name="stock_invoice_pack" string="Factura Almacenamiento" placeholder="Factura de almacenamiento" />
+                      <field name="product_full_transit" string="Usar en transito completo" placeholder="Se utiliza cuando el transito esta completo"/>
+                      <field name="one_line_invoice" string="Unificar en una sola linea al facturar" placeholder="Se utiliza cuando se quiere unificar el valor de los transitos en una sola linea"/>
+                  </group>
+              </page>
+          </xpath>
         </field>
     </record>
 
