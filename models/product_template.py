@@ -16,3 +16,5 @@ class ProductTemplate(models.Model):
     product_full_transit = fields.Boolean(string='Usar en tránsito completo')
 
     one_line_invoice = fields.Boolean(string='Unificar en una sola línea al facturar un egreso')
+
+    min_price = fields.Float(string='Importe minimo de facturación', default=0.0)
