@@ -66,26 +66,25 @@ class SaleOrder(models.Model):
             })
             _logger.info(f"Factura creada con ID: {invoice.id} para el pedido {order.name} (ID: {order.id})")
 
-            # Agregar líneas de factura para cada tarea asociada
-            for task in order.task_ids:
-                for product in products:
-                    if product.product_tmpl_id.one_line_invoice:
-                        # Agrupar tareas en una sola línea de factura
-                        task_names = '-'.join(order.task_ids.mapped('name'))
-                        line_vals = {
-                            'move_id': invoice.id,
-                            'product_id': product.id,
-                            'quantity': len(order.task_ids),  # Cantidad basada en el número de tareas
-                            'price_unit': product.lst_price,
-                            'name': f"{product.name} - {task_names}",
-                            'account_id': product.categ_id.property_account_income_categ_id.id,
-                            'sale_id': order.id,  # Relación con el pedido
-                            'task_id': task.id,  # Relación con una de las tareas
-                        }
-                        account_move_line_obj.create(line_vals)
-                        _logger.info(f"Línea de factura creada para producto con one_line_invoice: {product.name} - {task_names}")
-                        break  # Salir del bucle para evitar múltiples líneas para el mismo producto
-                    else:
+            # Agregar líneas de factura
+            for product in products:
+                if product.product_tmpl_id.one_line_invoice:
+                    # Agrupar tareas en una sola línea de factura
+                    task_names = '-'.join(order.task_ids.mapped('name'))
+                    line_vals = {
+                        'move_id': invoice.id,
+                        'product_id': product.id,
+                        'quantity': len(order.task_ids),  # Cantidad basada en el número de tareas
+                        'price_unit': product.lst_price,
+                        'name': f"{product.name} - {task_names}",
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        'sale_id': order.id,  # Relación con el pedido
+                        'task_id': order.task_ids[0].id,  # Relación con una de las tareas
+                    }
+                    account_move_line_obj.create(line_vals)
+                    _logger.info(f"Línea de factura creada para producto con one_line_invoice: {product.name} - {task_names}")
+                else:
+                    for task in order.task_ids:
                         line = account_move_line_obj.create({
                             'move_id': invoice.id,
                             'product_id': product.id,

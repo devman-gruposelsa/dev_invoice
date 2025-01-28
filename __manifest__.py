@@ -6,7 +6,7 @@
     'author': '',
     'website': '',
     'category': '',
-    'depends': ['base', 'product', 'sale', 'project', 'import_folder_016', 'dev_insurances', 'exe_selsa_commission', 'account_invoice_pricelist'],
+    'depends': ['base', 'product', 'sale', 'project', 'import_folder_016', 'dev_insurances', 'dev_stock', 'exe_selsa_commission', 'account_invoice_pricelist'],
     "data": [
         "views/project_task_views.xml",
         "views/product_template_views.xml",

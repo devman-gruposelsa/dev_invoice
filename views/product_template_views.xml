@@ -14,7 +14,7 @@
                       <field name="outcome_invoice_pack" string="Factura Egreso" placeholder="Factura de egreso" />
                       <field name="stock_invoice_pack" string="Factura Almacenamiento" placeholder="Factura de almacenamiento" />
                       <field name="product_full_transit" string="Usar en transito completo" placeholder="Se utiliza cuando el transito esta completo"/>
-                      <field name="one_line_invoice" string="Unificar en una sola linea al facturar" placeholder="Se utiliza cuando se quiere unificar el valor de los transitos en una sola linea"/>
+                      <field name="one_line_invoice" string="Unificar en una sola linea al facturar un egreso" placeholder="Se utiliza cuando se quiere unificar el valor de los transitos en una sola linea al facturar un egreso"/>
                   </group>
               </page>
           </xpath>

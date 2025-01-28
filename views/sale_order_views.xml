@@ -7,7 +7,8 @@
         <field name="arch" type="xml">
           <!-- Agregar el botón en el encabezado del formulario -->
           <xpath expr="//form/header" position="inside">
-            <button name="action_create_outcome_invoice" type="object" string="Crear factura saliente" class="oe_highlight"/>
+            <button name="action_create_outcome_invoice" type="object" string="Crear factura saliente" class="oe_highlight"
+                attrs="{'invisible': [('state', '!=', 'sale'), ('task_ids', '=', False)]}"/>
           </xpath>
         </field>
       </record>

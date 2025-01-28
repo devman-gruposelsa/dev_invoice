@@ -161,6 +161,10 @@ class ProjectTask(models.Model):
                 # Ignorar tareas con egreso_completo=True
                 continue
 
+            if not task.project_id.importation:
+                # Ignorar tareas cuyo proyecto no tiene importation=True
+                continue
+
             partner = task.partner_id
 
             if partner.monthly_invoice:
