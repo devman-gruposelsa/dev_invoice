@@ -12,5 +12,21 @@
                 env['project.task'].browse(env.context.get('active_ids', [])).action_generate_monthly_invoices()
             </field>
         </record>
+
+        <record id="cron_update_days_storage" model="ir.cron">
+            <field name="name">Actualizar Days Storage</field>
+            <field name="model_id" ref="project.model_project_task"/>
+            <field name="state">code</field>
+            <field name="code">
+tasks = env['project.task'].search([])
+tasks._compute_days_storage()
+tasks._compute_days_storage_invoiced()
+tasks._compute_days_storage_to_invoiced()
+            </field>
+            <field name="user_id" ref="base.user_root"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+        </record>
     </data>
 </odoo>

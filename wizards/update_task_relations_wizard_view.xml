@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_update_task_relations_wizard_form" model="ir.ui.view">
+        <field name="name">update.task.relations.wizard.form</field>
+        <field name="model">update.task.relations.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Actualizar relaciones de tareas">
+                <p>Este proceso actualizará las relaciones entre facturas y tareas.</p>
+                <footer>
+                    <button string="Actualizar" name="action_update_relations" type="object" class="btn-primary"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_update_task_relations" model="ir.actions.act_window">
+        <field name="name">Actualizar relaciones de tareas</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">update.task.relations.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem id="menu_update_task_relations"
+              name="Actualizar relaciones de tareas"
+              action="action_update_task_relations"
+              parent="account.menu_finance_configuration"
+              sequence="99"/>
+</odoo>

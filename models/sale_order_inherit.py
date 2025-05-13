@@ -13,25 +13,32 @@ class SaleOrder(models.Model):
         for order in self:
             if order.state == 'sale':  # Verificar si el estado es 'pedido de venta'
                 all_tasks_completed = True
-                for task in order.task_ids:
-                    if task.stock_qty > 0:  # Verificar si hay stock disponible
-                        all_tasks_completed = False
-                        break
-                if all_tasks_completed:
-                    order.write({'full_transit': True})
-                else:
-                    order.write({'full_transit': False})
+                if order.task_ids:
+                    for task in order.task_ids:
+                        # Verificar si hay stock disponible para el lote con el mismo nombre que la tarea
+                        lot_stock_qty = self.env['stock.quant'].search([
+                            ('lot_id.name', '=', task.name),
+                            ('quantity', '>', 0)
+                        ])
+                        if lot_stock_qty:
+                            all_tasks_completed = False
+                            break
+                    if all_tasks_completed:
+                        for task in order.task_ids:
+                            task.write({'full_transit': True})
+                    else:
+                        for task in order.task_ids:
+                            task.write({'full_transit': False})
             elif order.state in ['cancel', 'draft']:  # Si el pedido es cancelado o eliminado
                 for task in order.task_ids:
                     task.write({'full_transit': False})
 
-    @api.model
+    #@api.model
     def write(self, vals):
         res = super(SaleOrder, self).write(vals)
         self.check_and_update_order_status()
         return res
 
-    @api.model
     def unlink(self):
         for order in self:
             if order.state in ['cancel', 'draft']:

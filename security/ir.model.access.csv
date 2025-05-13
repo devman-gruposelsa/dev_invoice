@@ -1,2 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_dev_insurances_dev_insurances,dev_insurances.dev_insurances,model_dev_insurances_dev_insurances,base.group_user,1,1,1,1access_sale order line_manager,sale order line_manager,model_sale order line,,1,1,1,1
+access_project_task_wizard,access_project_task_wizard,model_project_task_days_invoiced_wizard,stock.group_stock_manager,1,1,1,0
+access_project_task_wizard_fecha,access_project_task_wizard_fecha,model_project_task_fecha_ingreso_wizard,stock.group_stock_manager,1,1,1,0
+access_update_task_relations_wizard,access_update_task_relations_wizard,model_update_task_relations_wizard,stock.group_stock_manager,1,1,1,0

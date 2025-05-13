@@ -1,0 +1,5 @@
+<button name="_compute_task_id" 
+        string="Recalcular Carpetas" 
+        type="object" 
+        class="oe_highlight"
+        groups="base.group_system"/>

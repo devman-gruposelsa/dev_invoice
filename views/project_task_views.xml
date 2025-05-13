@@ -16,7 +16,7 @@
                         string="Factura de egreso"
                         type="object"
                         class="btn-primary"/>
-                <button name="action_generate_monthly_invoices"
+                <button name="action_create_storage_invoice"
                         string="Factura de almacenamiento mensual"
                         type="object"
                         class="btn-primary"/>
@@ -54,8 +54,34 @@
             <field name="inherit_id" ref="dev_insurances.custom_project_task_form_view_2"/>
             <field name="arch" type="xml">
                 <xpath expr="//field[@name='days_storage']" position="after">
-                    <field name="days_invoiced" attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                    <label for="days_invoiced" string="Dias facturados" attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                    <div>
+                      <field name="days_invoiced" string="Dias facturados" class="oe_inline"/>
+                        <!--<div class="o_field_widget o_field_group">-->
+                        <!--<div class="oe_button_box" name="button_box_co" style="width: auto;">-->
+                      <button name='action_open_days_invoiced_wizard' type="object"
+                              string="Modificar dias facturados"
+                              title="Modificar dias facturados"
+                              class="oe_stat_button"
+                              icon="fa-pencil-square-o" attrs="{'invisible': [('importation_task', '=', False)], 'groups': 'stock.group_stock_manager'}"/>
+                        <!--</div>-->
+                    </div>
+                    <field name="days_to_invoiced" attrs="{'invisible': [('importation_task', '=', False)]}"/>
                     <field name="full_transit" attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                </xpath>
+                <xpath expr="//field[@name='fecha_ingreso']" position="replace">
+                    <label for="fecha_ingreso" string="Fecha y hora de ingreso" attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                    <div>
+                      <field name="fecha_ingreso" string="Fecha y hora de ingreso" class="oe_inline"/>
+                        <!--<div class="o_field_widget o_field_group">-->
+                        <!--<div class="oe_button_box" name="button_box_co" style="width: auto;">-->
+                      <button name='action_open_fecha_ingreso_wizard' type="object"
+                              string="Modificar fecha y hora de ingreso"
+                              title="Modificar fecha y hora de ingreso"
+                              class="oe_stat_button"
+                              icon="fa-pencil-square-o" attrs="{'invisible': [('importation_task', '=', False)], 'groups': 'stock.group_stock_manager'}"/>
+                        <!--</div>-->
+                    </div>
                 </xpath>
             </field>
         </record>
@@ -70,6 +96,21 @@
                   <group name="facturas">
                     <field name="invoice_ids_filtered" string="Facturas"/>
                   </group>
+                </page>
+                <page string="Lineas de facturas relacionadas" name="move_lines_ids">
+                    <field name="move_lines_ids" nolabel="1">
+                        <tree editable="false">
+                            <field name="related_so_sequence"/>
+                            <field name="move_id"/>
+                            <field name="product_id"/>
+                            <field name="name"/>
+                            <field name="quantity"/>
+                            <field name="product_uom_id"/>
+                            <field name="days_storage"/>
+                            <field name="price_unit"/>
+                            <field name="price_subtotal"/>
+                        </tree>
+                    </field>
                 </page>
             </xpath>
         </field>
