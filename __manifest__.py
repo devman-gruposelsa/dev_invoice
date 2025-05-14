@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Dev_invoice',
-    'version': '16.0.1',
+    'version': '16.10.5',
     'summary': """ Dev_invoice Summary """,
     'author': '',
     'website': '',

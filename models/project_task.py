@@ -29,7 +29,7 @@ class ProjectTask(models.Model):
     move_lines_ids = fields.Many2many('account.move.line', compute="_compute_move_line_ids", string="Líneas de Factura", help="Líneas de factura asociadas a esta tarea.", store=False)
 
 
-    @api.depends('name')
+    @api.depends('name', 'invoice_ids_filtered')
     def _compute_move_line_ids(self):
         for task in self:
             move_lines = self.env['account.move.line'].search([
@@ -41,30 +41,30 @@ class ProjectTask(models.Model):
         for rec in self:
             rec._compute_transit_total_cost()
 
-    #@api.depends('invoice_ids_filtered.amount_untaxed_signed')
+    @api.depends('move_lines_ids')
     def _compute_transit_total_cost(self):
         for rec in self:
-            # Inicializa una lista para almacenar facturas filtradas
-            invoices_filtered = []
+            _logger.info(f"Calculando costo total de tránsito para tarea: {rec.id}")
             
-            # Busca todas las facturas (esto podría optimizarse si se conoce el rango necesario)
-            invoices = self.env['account.move'].search([])
-            _logger.info("Todas las facturas: %s", invoices.ids)
-
-            # Filtra las facturas relacionadas con esta tarea
-            for record in invoices:
-                if record.task_id:
-                    for task in record.task_id:
-                        _logger.info("Factura: %s relacionada con tarea: %s", record.id, task.id)
-                        if task.id == rec.id:
-                            invoices_filtered.append(record)
+            # Búsqueda optimizada: incluimos facturas y notas de crédito
+            moves = self.env['account.move'].search([
+                ('task_id', 'in', [rec.id]),
+                ('move_type', 'in', ['out_invoice', 'out_refund']),  # Facturas y notas de crédito
+                ('state', 'not in', ['draft', 'cancel'])
+            ])
             
-            # Calcula el costo total de las facturas filtradas
-            rec.transit_total_cost = sum(invoice.amount_untaxed_signed for invoice in invoices_filtered)
-
-            # Registra la información para depuración
-            _logger.info("Tarea: %s | Facturas filtradas: %s", rec.id, [inv.id for inv in invoices_filtered])
-            _logger.info("Tarea: %s | Transit Total Cost: %s", rec.id, rec.transit_total_cost)
+            if moves:
+                # Para notas de crédito el amount es negativo, se suma automáticamente
+                rec.transit_total_cost = sum(moves.mapped('amount_untaxed_signed'))
+                _logger.info(
+                    f"Tarea: {rec.id} | "
+                    f"Documentos encontrados: {len(moves)} | "
+                    f"Total: {rec.transit_total_cost} | "
+                    f"IDs: {moves.ids}"
+                )
+            else:
+                rec.transit_total_cost = 0.0
+                _logger.info(f"Tarea: {rec.id} | No se encontraron documentos relacionados")
     
     @api.depends('move_lines_ids.days_storage', 'move_lines_ids.move_id.state', 'days_storage')
     def _compute_days_storage_invoiced(self):
