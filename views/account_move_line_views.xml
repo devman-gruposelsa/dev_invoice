@@ -11,6 +11,9 @@
                 <field name="days_storage" optional="show"/>
                 <field name="calculate_custom" optional="hide"/>
             </xpath>
+            <xpath expr="//form[1]/sheet[1]/notebook[1]/page[@name='invoice_tab']/field[@name='invoice_line_ids']/tree[1]/field[@name='price_subtotal']" position="before">
+                <field name="custom_subtotal" optional="hide"/>
+            </xpath>
         </field>
     </record>
 

@@ -300,15 +300,14 @@ class ProjectTask(models.Model):
             # Agregar líneas de factura
             for product in products:
                 # Verificar si el product.template tiene fob_total como True
+                # Verificar si el product.template tiene fob_total como True
                 if product.product_tmpl_id.fob_total:
-                    if factura_mes == ingreso_mes and factura_anio == ingreso_anio:
-                        _logger.info(f"Producto {product.name} omitido porque la fecha de factura está en el mismo mes que la fecha de ingreso.")
-                        continue  # Saltar este producto
-                    else:
-                        # Calcular el quantity como total_fob * rate * 0.001 si el mes/año de la factura es posterior
-                        quantity = task.total_fob * rate * 0.001
+                    # Si la fecha de factura es diferente al mes de ingreso, agregar el producto
+                    if factura_mes != ingreso_mes and factura_anio == ingreso_anio or factura_anio != ingreso_anio:
+                        quantity = 1
+                        price_subtotal = task.total_fob
                         name = f"{task.name} - Fob total:{task.total_fob} - USD:{rate}"
-                        _logger.info(f"Tipo de cambio {rate} - Total FOB {task.total_fob}")
+                        _logger.info(f"Agregando producto FOB - Tipo de cambio {rate} - Total FOB {task.total_fob}")
 
                 elif product.product_tmpl_id.is_storage:
                     # Calcular el precio basado en total_m3 * days_to_invoiced * lst_price

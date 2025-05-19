@@ -14,16 +14,24 @@ class AccountMoveInherit(models.Model):
                              compute='_compute_task_id',
                              store=True)
 
-    @api.depends('invoice_line_ids.task_id', 'invoice_line_ids.sale_id.task_ids')
+    @api.depends('invoice_line_ids.task_id', 'invoice_line_ids.sale_id.task_ids', 'move_type')
     def _compute_task_id(self):
         for rec in self:
+            # Solo procesar facturas salientes y notas de crédito
+            if rec.move_type not in ['out_invoice', 'out_refund']:
+                rec.task_id = [(5, 0, 0)]  # Limpiamos las relaciones
+                continue
+                
             task_ids = []
-            _logger.info(f"Procesando cálculo de task_id para factura {rec.id}")
+            _logger.info(f"Procesando cálculo de task_id para {rec.move_type} {rec.id}")
+            
             for line in rec.invoice_line_ids:
                 # Primero verificamos si la línea tiene una tarea directamente asociada
                 if line.task_id and line.task_id.project_id.importation:
                     # Solo agregar tareas cuyo project_id tiene importation=True
                     task_ids.append(line.task_id.id)
+                    _logger.info(f"Línea {line.id} asociada directamente a tarea {line.task_id.id}")
+                
                 # Si no tiene tarea directa pero tiene orden de venta, buscamos en las tareas de la orden
                 elif line.sale_id:
                     task_ids.extend(
@@ -31,9 +39,13 @@ class AccountMoveInherit(models.Model):
                         for task in line.sale_id.task_ids 
                         if task.project_id.importation
                     )
+                    if task_ids:
+                        _logger.info(f"Orden de venta {line.sale_id.id} asociada a tareas: {task_ids}")
             
             # Eliminamos duplicados y asignamos las tareas
             rec.task_id = [(6, 0, list(set(task_ids)))]
+            if task_ids:
+                _logger.info(f"Tareas finales para {rec.move_type} {rec.id}: {list(set(task_ids))}")
 
     @api.model
     def create(self, vals):
