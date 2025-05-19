@@ -297,28 +297,49 @@ class ProjectTask(models.Model):
             ingreso_mes = task.fecha_ingreso.month
             ingreso_anio = task.fecha_ingreso.year
 
+            # Obtener el total de días del mes actual
+            ultimo_dia_mes = invoice_date.replace(day=1)
+            if invoice_date.month == 12:
+                ultimo_dia_mes = ultimo_dia_mes.replace(year=invoice_date.year + 1, month=1)
+            else:
+                ultimo_dia_mes = ultimo_dia_mes.replace(month=invoice_date.month + 1)
+            days_in_month = (ultimo_dia_mes - invoice_date.replace(day=1)).days
+            
+            _logger.info(f"Días totales del mes {invoice_date.strftime('%B')}: {days_in_month}")
+
             # Agregar líneas de factura
             for product in products:
-                # Verificar si el product.template tiene fob_total como True
-                # Verificar si el product.template tiene fob_total como True
                 if product.product_tmpl_id.fob_total:
                     # Si la fecha de factura es diferente al mes de ingreso, agregar el producto
                     if factura_mes != ingreso_mes and factura_anio == ingreso_anio or factura_anio != ingreso_anio:
                         quantity = 1
-                        price_subtotal = task.total_fob
+                        fob_total = task.total_fob
+                        calculate_custom = True
                         name = f"{task.name} - Fob total:{task.total_fob} - USD:{rate}"
                         _logger.info(f"Agregando producto FOB - Tipo de cambio {rate} - Total FOB {task.total_fob}")
 
+                    account_move_line_obj.create({
+                        'move_id': invoice.id,
+                        'product_id': product.id,
+                        'quantity': quantity,
+                        #'days_storage': days_in_month,  # Usamos los días totales del mes
+                        'calculate_custom': calculate_custom,
+                        'fob_total': fob_total,
+                        'name': name,
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        'task_id': task.id,
+                    })
+
                 elif product.product_tmpl_id.is_storage:
-                    # Calcular el precio basado en total_m3 * days_to_invoiced * lst_price
-                    subtotal = task.total_m3 * task.days_to_invoiced * product.lst_price
+                    # Calcular el precio basado en total_m3 * days_in_month * lst_price
+                    subtotal = task.total_m3 * days_in_month * product.lst_price
                     if subtotal < product.product_tmpl_id.min_price:
                         price_subtotal = product.product_tmpl_id.min_price
                     else:
                         price_subtotal = subtotal
 
                     quantity = task.total_m3
-                    name = f"{product.name} - {task.name} - {task.total_m3} m3 - {task.days_to_invoiced} días"
+                    name = f"{product.name} - {task.name} - {task.total_m3} m3 - {days_in_month} días"
                     calculate_custom = True
                     _logger.info(f"Producto {product.name} con almacenamiento: Subtotal calculado {subtotal}, Precio final {price_subtotal}")
 
@@ -326,9 +347,9 @@ class ProjectTask(models.Model):
                         'move_id': invoice.id,
                         'product_id': product.id,
                         'quantity': quantity,
-                        'days_storage': task.days_to_invoiced,  # Días de almacenamiento del stock
+                        'days_storage': days_in_month,  # Usamos los días totales del mes
                         'calculate_custom': calculate_custom,
-                        'price_unit': price_subtotal,  # Calcular el precio unitario
+                        'price_unit': price_subtotal,
                         'name': name,
                         'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
@@ -337,13 +358,13 @@ class ProjectTask(models.Model):
                 else:
                     # Para productos sin fob_total ni is_storage, usar el total_m3 como cantidad
                     quantity = 1
-                    name = f"{product.name} - {task.name} - {task.total_m3} m3 - {task.days_to_invoiced} días"
+                    name = f"{product.name} - {task.name}"
 
                     account_move_line_obj.create({
                         'move_id': invoice.id,
                         'product_id': product.id,
                         'quantity': quantity,
-                        'days_storage': task.days_to_invoiced,  # Días de almacenamiento del stock
+                        #'days_storage': task.days_to_invoiced,  # Días de almacenamiento del stock
                         'calculate_custom': False,
                         'price_unit': product.lst_price,
                         'name': name,

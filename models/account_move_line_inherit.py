@@ -19,6 +19,11 @@ class AccountMoveLineInherit(models.Model):
         help='Días de almacenamiento para esta línea de factura.',
     )
 
+    fob_total = fields.Integer(
+        string='Fob Total',
+        help='Total FOB para esta línea de factura.',
+    )
+
     calculate_custom = fields.Boolean(
         string='Calculo custom',
         help='Campo para indicar si se debe calcular el subtotal de forma personalizada.',
@@ -53,7 +58,7 @@ class AccountMoveLineInherit(models.Model):
                 _logger.info(f"[CUSTOM DEBUG] Tasa de cambio USD: {rate}")
 
                 if product.fob_total:
-                    subtotal = line.quantity * line.price_unit * rate * 0.001
+                    subtotal = line.fob_total * rate * 0.001
                     if subtotal < product.min_price:
                         line.update({
                             'price_unit': product.min_price,
@@ -102,8 +107,8 @@ class AccountMoveLineInherit(models.Model):
 
             # Cálculo para productos FOB
             if product.product_tmpl_id.fob_total:
-                subtotal = line.quantity * line.price_unit * rate * 0.001
-                _logger.info(f"[CUSTOM DEBUG] Cálculo FOB - Cantidad: {line.quantity} * Precio: {line.price_unit} * Rate: {rate} * 0.001")
+                subtotal = line.fob_total * rate * 0.001
+                _logger.info(f"[CUSTOM DEBUG] Cálculo FOB - fob total: {line.fob_total} * Rate: {rate} * 0.001")
                 
                 if subtotal < product.product_tmpl_id.min_price:
                     subtotal = product.product_tmpl_id.min_price
@@ -145,9 +150,9 @@ class AccountMoveLineInherit(models.Model):
 
             # Cálculo para productos FOB
             if product.product_tmpl_id.fob_total:
-                subtotal = line.quantity * line.price_unit * rate * 0.001
-                _logger.info(f"[CUSTOM DEBUG] Cálculo FOB - Cantidad: {line.quantity} * Precio: {line.price_unit} * Rate: {rate} * 0.001 = {subtotal}")
-                
+                subtotal = line.fob_total * rate * 0.001
+                _logger.info(f"[CUSTOM DEBUG] Cálculo FOB - fob total: {line.fob_total} * Rate: {rate} * 0.001 = {subtotal}")
+
                 if subtotal < product.product_tmpl_id.min_price:
                     subtotal = product.product_tmpl_id.min_price
                     _logger.info(f"[CUSTOM DEBUG] Se aplica precio mínimo FOB: {subtotal}")
@@ -183,7 +188,7 @@ class AccountMoveLineInherit(models.Model):
             rate = 1 / rate_data.get(usd_currency.id, 1.0)
 
         if product.product_tmpl_id.fob_total:
-            price = self.price_unit * rate * 0.001
+            price = self.fob_total * rate * 0.001
             return max(price, product.product_tmpl_id.min_price)
         elif product.product_tmpl_id.is_storage:
             price = self.price_unit * self.days_storage
