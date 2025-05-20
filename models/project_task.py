@@ -487,14 +487,15 @@ class ProjectTask(models.Model):
 
         _logger.info(f"Tareas relacionadas con la factura {invoice.id}: {invoice.task_id.ids}")
 
-    # TODO: sumarizar fob total en le producto seguros (revisar config producto) de todos los transitos que esten unificados en la factura. En el almacenamiento mensual desde tareas revisar que se haya implementado la linea del producto seguro (fob)
+    # echo ok: sumarizar fob total en le producto seguros (revisar config producto) de todos los transitos que esten unificados en la factura. En el almacenamiento mensual desde tareas revisar que se haya implementado la linea del producto seguro (fob)
     def action_generate_monthly_invoices(self):
-        grouped_invoices = {}
+        # Agrupar tareas por cliente y por IMO
+        grouped_tasks = {}
         invalid_tasks = []
-
+        
         _logger.info("Iniciando el proceso de generación de facturas mensuales...")
 
-        # Agrupar tareas por cliente
+        # Primera agrupación: por cliente y por IMO
         for task in self:
             if task.egreso_completo:
                 invalid_tasks.append(task)
@@ -502,46 +503,138 @@ class ProjectTask(models.Model):
 
             partner = task.partner_id
             if partner.monthly_invoice:
-                if partner.id not in grouped_invoices:
-                    grouped_invoices[partner.id] = []
-                grouped_invoices[partner.id].append(task)
+                # Clave compuesta: (partner_id, is_imo)
+                key = (partner.id, task.is_imo)
+                if key not in grouped_tasks:
+                    grouped_tasks[key] = []
+                grouped_tasks[key].append(task)
             else:
-                # Crear factura individual y agregar a la lista
-                invoice = self._create_single_task_invoice(task)
+                # Crear factura individual
+                self._create_single_task_invoice(task)
 
         if invalid_tasks:
             task_names = ', '.join([task.name for task in invalid_tasks])
             raise ValidationError(f"Las siguientes tareas tienen 'Egreso Completo' en True y no se facturarán: {task_names}")
 
-        # Crear facturas agrupadas por cliente
-        for partner_id, task_list in grouped_invoices.items():
+        # Procesar grupos de tareas
+        for (partner_id, is_imo), tasks in grouped_tasks.items():
             partner = self.env['res.partner'].browse(partner_id)
-            account_move_obj = self.env['account.move']
-            account_move_line_obj = self.env['account.move.line']
-            invoice = account_move_obj.create({
+            
+            # Calcular fecha y período
+            invoice_date = fields.Date.today()
+            mes_factura = invoice_date.strftime('%B').capitalize()
+            anio_factura = invoice_date.strftime('%Y')
+            
+            # Calcular días del mes
+            ultimo_dia_mes = invoice_date.replace(day=1)
+            if invoice_date.month == 12:
+                ultimo_dia_mes = ultimo_dia_mes.replace(year=invoice_date.year + 1, month=1)
+            else:
+                ultimo_dia_mes = ultimo_dia_mes.replace(month=invoice_date.month + 1)
+            days_in_month = (ultimo_dia_mes - invoice_date.replace(day=1)).days
+
+            # Preparar narración
+            inicio_periodo = invoice_date.replace(day=1).strftime('%d/%m/%Y')
+            fin_periodo = (ultimo_dia_mes - timedelta(days=1)).strftime('%d/%m/%Y')
+            narration = (
+                "NOTA DE MENSUAL<br/>"
+                f"CORRESPONDE AL ALMACENAJE MENSUAL {mes_factura.upper()} {anio_factura}<br/>"
+                f"Periodo Facturado: {inicio_periodo} al {fin_periodo}<br/><br/>"
+                "Banco Santander<br/>"
+                "CBU: 0720429020000000055554<br/>"
+                "Banco Credicoop<br/>"
+                "CBU: 1910246555024600234278<br/><br/>"
+                "BAJA EN IIBB CABA - BS AS DESDE 31/08/2024"
+            )
+
+            # Crear factura
+            invoice = self.env['account.move'].create({
                 'partner_id': partner.id,
                 'move_type': 'out_invoice',
-                'invoice_origin': ', '.join([task.name for task in task_list]),
+                'invoice_origin': ', '.join([task.name for task in tasks]),
+                'invoice_date': invoice_date,
+                'narration': narration,
             })
 
-            # Crear líneas de factura
-            for task in task_list:
-                products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
-                for product in products:
-                    account_move_line_obj.create({
-                        'move_id': invoice.id,
-                        'product_id': product.id,
-                        'quantity': task.total_m3,
-                        'days_storage': task.days_to_invoiced, # Días de almacenamiento del stock
-                        'price_unit': product.lst_price,
-                        'name': f"{product.name} - {task.name} - {task.total_m3} m3 - {task.days_to_invoiced} días",
-                        'account_id': product.categ_id.property_account_income_categ_id.id,
-                        'task_id': task.id,
-                    })
+            # Obtener productos según IMO
+            domain = [
+                ('stock_invoice_pack', '=', True),
+                ('is_imo', '=', is_imo)
+            ]
+            products = self.env['product.product'].search(domain)
+
+            # Obtener tasa de cambio USD
+            usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
+            if not usd_currency:
+                raise ValidationError("No se encontró la divisa USD en el sistema.")
+            rate = 1 / usd_currency.rate
+
+            # Procesar productos
+            for product in products:
+                if product.product_tmpl_id.fob_total:
+                    # Sumarizar FOB de todas las tareas
+                    total_fob = 0
+                    task_details = []
+                    for task in tasks:
+                        if task.total_fob:
+                            total_fob += task.total_fob
+                            task_details.append(f"{task.name}: {task.total_fob}")
+
+                    if total_fob > 0:
+                        name = f"FOB Total - {' | '.join(task_details)} - USD:{rate}"
+                        self.env['account.move.line'].create({
+                            'move_id': invoice.id,
+                            'product_id': product.id,
+                            'quantity': 1,
+                            'calculate_custom': True,
+                            'fob_total': total_fob,
+                            'name': name,
+                            'account_id': product.categ_id.property_account_income_categ_id.id,
+                        })
+
+                elif product.product_tmpl_id.is_storage:
+                    # Crear línea por cada tarea para storage
+                    for task in tasks:
+                        subtotal = task.total_m3 * days_in_month * product.lst_price
+                        if subtotal < product.product_tmpl_id.min_price:
+                            price_subtotal = product.product_tmpl_id.min_price
+                        else:
+                            price_subtotal = subtotal
+
+                        name = f"{product.name} - {task.name} - {task.total_m3} m3 - {days_in_month} días"
+                        self.env['account.move.line'].create({
+                            'move_id': invoice.id,
+                            'product_id': product.id,
+                            'quantity': task.total_m3,
+                            'days_storage': days_in_month,
+                            'calculate_custom': True,
+                            'price_unit': price_subtotal,
+                            'name': name,
+                            'account_id': product.categ_id.property_account_income_categ_id.id,
+                            'task_id': task.id,
+                        })
+
+                else:
+                    # Productos normales
+                    for task in tasks:
+                        name = f"{product.name} - {task.name}"
+                        self.env['account.move.line'].create({
+                            'move_id': invoice.id,
+                            'product_id': product.id,
+                            'quantity': 1,
+                            'calculate_custom': False,
+                            'price_unit': product.lst_price,
+                            'name': name,
+                            'account_id': product.categ_id.property_account_income_categ_id.id,
+                            'task_id': task.id,
+                        })
 
             try:
                 invoice.button_update_prices_from_pricelist()
             except Exception as e:
                 _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
+
+        _logger.info("Proceso de generación de facturas mensuales completado")
+        return True
 
 
