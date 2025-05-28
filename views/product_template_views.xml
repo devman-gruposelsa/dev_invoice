@@ -19,6 +19,7 @@
                       <field name="fob_total" string="Utilizar para linea fob"/>
                       <field name="is_storage" string="Utilizar para linea almacenamiento"/>
                       <field name="is_imo" string="Utilizar para facturación IMO"/>
+                      <field name="is_general" string="Utilizar para facturación General e IMO"/>
                   </group>
               </page>
           </xpath>

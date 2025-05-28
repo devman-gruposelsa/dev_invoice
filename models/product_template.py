@@ -24,3 +24,5 @@ class ProductTemplate(models.Model):
     min_price = fields.Float(string='Importe minimo de facturación', default=0.0)
 
     is_imo = fields.Boolean(string='Utilizar para facturación IMO')
+
+    is_general = fields.Boolean(string='Utilizar para facturación General e IMO')

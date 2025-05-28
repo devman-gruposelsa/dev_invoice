@@ -64,25 +64,19 @@ class AccountMoveLineInherit(models.Model):
                             'price_unit': product.min_price,
                             'quantity': 1,
                         })
-                    #     line._recompute_price()
-                    # else:
-                    #     line._recompute_price()
 
                 elif product.is_storage:
                     subtotal = line.quantity * line.days_storage * line.price_unit
                     if subtotal < product.min_price:
-                        unit_price = product.min_price / line.quantity if line.quantity else 0
-                        line.update({
-                            'price_unit': unit_price,
-                        })
-                    #     line._recompute_price()
-                    # else:
-                    #     line._recompute_price()
+                        # Aseguramos que el precio unitario resulte en el monto mínimo exacto
+                        if line.quantity and line.days_storage:
+                            new_price_unit = product.min_price / (line.quantity * line.days_storage)
+                            # Ajustamos el precio unitario con más precisión decimal
+                            line.with_context(check_move_validity=False).price_unit = round(new_price_unit, 6)
+                            _logger.info(f"[CUSTOM DEBUG] Precio mínimo ajustado - Nuevo precio unitario: {new_price_unit}")
                 
-                # Cortamos para que no siga con pricelist
                 continue
 
-            # Si no aplica lógica custom, usamos pricelist
             _logger.info("[CUSTOM DEBUG] Aplica lógica de pricelist.")
             line.with_context(check_move_validity=False).price_unit = line._get_price_with_pricelist()
 
@@ -94,16 +88,33 @@ class AccountMoveLineInherit(models.Model):
             if not line.calculate_custom or not line.product_id:
                 continue
 
-            _logger.info(f"[CUSTOM DEBUG] Calculando subtotal para línea {line.id} - Producto: {line.product_id.display_name}")
-            
-            product = line.product_id
+            # Obtener tasa de cambio USD al inicio
             usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
             rate = 1.0
-            
             if usd_currency:
                 rate_data = usd_currency._get_rates(self.env.company, fields.Date.context_today(self))
                 rate = 1 / rate_data.get(usd_currency.id, 1.0)
                 _logger.info(f"[CUSTOM DEBUG] Tasa de cambio USD: {rate}")
+
+            product = line.product_id
+            if product.product_tmpl_id.is_storage:
+                base_subtotal = line.quantity * line.days_storage * line.price_unit
+                
+                if base_subtotal < product.product_tmpl_id.min_price:
+                    # Ajustamos el precio unitario para que el subtotal sea exactamente el precio mínimo
+                    new_price_unit = product.product_tmpl_id.min_price / (line.quantity * line.days_storage)
+                    line.with_context(check_move_validity=False).write({
+                        'price_unit': round(new_price_unit, 6),
+                        'price_subtotal': product.product_tmpl_id.min_price
+                    })
+                    _logger.info(f"""[CUSTOM DEBUG] Ajuste a precio mínimo:
+                        - Precio unitario ajustado: {new_price_unit}
+                        - Subtotal final: {product.product_tmpl_id.min_price}
+                    """)
+                else:
+                    line.price_subtotal = round(base_subtotal, 2)
+                
+                continue
 
             # Cálculo para productos FOB
             if product.product_tmpl_id.fob_total:
@@ -116,12 +127,17 @@ class AccountMoveLineInherit(models.Model):
 
             # Cálculo para productos de almacenamiento
             elif product.product_tmpl_id.is_storage:
-                subtotal = line.quantity * line.days_storage * line.price_unit
-                _logger.info(f"[CUSTOM DEBUG] Cálculo Storage - Cantidad: {line.quantity} * Días: {line.days_storage} * Precio: {line.price_unit}")
+                # Calculamos el subtotal normal
+                base_subtotal = line.quantity * line.days_storage * line.price_unit
                 
-                if subtotal < product.product_tmpl_id.min_price:
-                    subtotal = product.product_tmpl_id.min_price
-                    _logger.info(f"[CUSTOM DEBUG] Se aplica precio mínimo: {subtotal}")
+                # Aplicamos el precio mínimo si corresponde
+                line.price_subtotal = max(base_subtotal, product.product_tmpl_id.min_price)
+                
+                _logger.info(f"""[CUSTOM DEBUG] Cálculo Storage:
+                    - Base subtotal: {base_subtotal}
+                    - Precio mínimo: {product.product_tmpl_id.min_price}
+                    - Subtotal final: {line.price_subtotal}
+                """)
 
             else:
                 _logger.info("[CUSTOM DEBUG] No aplica cálculo especial")

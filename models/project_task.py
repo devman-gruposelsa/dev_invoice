@@ -167,6 +167,9 @@ class ProjectTask(models.Model):
             rate = usd_currency.rate  # Tasa de cambio actual de USD
             _logger.info(f"Tasa de cambio USD: {rate}")
 
+            if not task.fecha_ingreso:
+                raise ValidationError(f"La tarea {task.name} no tiene definida la fecha de ingreso.")
+
             # Validar si la fecha de la factura está en el mismo mes que la fecha_ingreso
             factura_mes = invoice.invoice_date.month
             factura_anio = invoice.invoice_date.year
@@ -291,6 +294,9 @@ class ProjectTask(models.Model):
             rate = 1 / usd_currency.rate # Tasa de cambio actual de USD
             _logger.info(f"Tasa de cambio USD: {rate}")
 
+            if not task.fecha_ingreso:
+                raise ValidationError(f"La tarea {task.name} no tiene definida la fecha de ingreso.")
+
             # Validar si la fecha de la factura está en el mismo mes que la fecha_ingreso
             factura_mes = invoice.invoice_date.month
             factura_anio = invoice.invoice_date.year
@@ -318,38 +324,40 @@ class ProjectTask(models.Model):
                         name = f"{task.name} - Fob total:{task.total_fob} - USD:{rate}"
                         _logger.info(f"Agregando producto FOB - Tipo de cambio {rate} - Total FOB {task.total_fob}")
 
-                    account_move_line_obj.create({
-                        'move_id': invoice.id,
-                        'product_id': product.id,
-                        'quantity': quantity,
-                        #'days_storage': days_in_month,  # Usamos los días totales del mes
-                        'calculate_custom': calculate_custom,
-                        'fob_total': fob_total,
-                        'name': name,
-                        'account_id': product.categ_id.property_account_income_categ_id.id,
-                        'task_id': task.id,
-                    })
+                        account_move_line_obj.create({
+                            'move_id': invoice.id,
+                            'product_id': product.id,
+                            'quantity': quantity,
+                            'calculate_custom': calculate_custom,
+                            'fob_total': fob_total,
+                            'name': name,
+                            'account_id': product.categ_id.property_account_income_categ_id.id,
+                            'task_id': task.id,
+                        })
 
                 elif product.product_tmpl_id.is_storage:
                     # Calcular el precio basado en total_m3 * days_in_month * lst_price
-                    subtotal = task.total_m3 * days_in_month * product.lst_price
+                    quantity = task.total_m3
+                    subtotal = quantity * days_in_month * product.lst_price
+                    calculate_custom = True
+                    
                     if subtotal < product.product_tmpl_id.min_price:
+                        # Ajustamos el price_unit para que al multiplicar por la cantidad dé el min_price exacto
+                        price_unit = product.product_tmpl_id.min_price / (quantity if quantity > 0 else 1)
                         price_subtotal = product.product_tmpl_id.min_price
                     else:
+                        price_unit = days_in_month * product.lst_price
                         price_subtotal = subtotal
 
-                    quantity = task.total_m3
                     name = f"{product.name} - {task.name} - {task.total_m3} m3 - {days_in_month} días"
-                    calculate_custom = True
-                    _logger.info(f"Producto {product.name} con almacenamiento: Subtotal calculado {subtotal}, Precio final {price_subtotal}")
-
+                    
                     account_move_line_obj.create({
                         'move_id': invoice.id,
                         'product_id': product.id,
                         'quantity': quantity,
-                        'days_storage': days_in_month,  # Usamos los días totales del mes
+                        'days_storage': days_in_month,
                         'calculate_custom': calculate_custom,
-                        'price_unit': price_subtotal,
+                        'price_unit': price_unit,
                         'name': name,
                         'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
@@ -359,13 +367,13 @@ class ProjectTask(models.Model):
                     # Para productos sin fob_total ni is_storage, usar el total_m3 como cantidad
                     quantity = 1
                     name = f"{product.name} - {task.name}"
+                    calculate_custom = False
 
                     account_move_line_obj.create({
                         'move_id': invoice.id,
                         'product_id': product.id,
                         'quantity': quantity,
-                        #'days_storage': task.days_to_invoiced,  # Días de almacenamiento del stock
-                        'calculate_custom': False,
+                        'calculate_custom': calculate_custom,
                         'price_unit': product.lst_price,
                         'name': name,
                         'account_id': product.categ_id.property_account_income_categ_id.id,
@@ -456,36 +464,102 @@ class ProjectTask(models.Model):
         if not products:
             raise ValidationError(f"No hay productos configurados para facturación de almacenamiento para la tarea {task.name}.")
 
+        # Calcular fecha y período para la narración
+        invoice_date = fields.Date.today()
+        mes_factura = invoice_date.strftime('%B').capitalize()
+        anio_factura = invoice_date.strftime('%Y')
+        
+        # Calcular el periodo facturado
+        inicio_periodo = invoice_date.replace(day=1).strftime('%d/%m/%Y')
+        fin_periodo = (invoice_date.replace(day=1).replace(month=invoice_date.month % 12 + 1) - timedelta(days=1)).strftime('%d/%m/%Y')
+
+        # Preparar narración
+        narration = (
+            "NOTA DE MENSUAL<br/>"
+            f"CORRESPONDE AL ALMACENAJE MENSUAL {mes_factura.upper()} {anio_factura}<br/>"
+            f"Periodo Facturado: {inicio_periodo} al {fin_periodo}<br/><br/>"
+            "Banco Santander<br/>"
+            "CBU: 0720429020000000055554<br/>"
+            "Banco Credicoop<br/>"
+            "CBU: 1910246555024600234278<br/><br/>"
+            "BAJA EN IIBB CABA - BS AS DESDE 31/08/2024"
+        )
+
         # Crear la factura para la tarea
         invoice = account_move_obj.create({
             'partner_id': task.partner_id.id,
             'move_type': 'out_invoice',
             'invoice_origin': task.name,
+            'invoice_date': invoice_date,
+            'narration': narration,
         })
 
         _logger.info(f"Factura creada con ID: {invoice.id} para la tarea {task.name} (ID: {task.id})")
 
-        # Agregar líneas de factura: Iterar sobre los productos asociados a la tarea
+        # Obtener tasa de cambio USD
+        usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
+        rate = 1.0
+        if usd_currency:
+            rate_data = usd_currency._get_rates(self.env.company, fields.Date.context_today(self))
+            rate = 1 / rate_data.get(usd_currency.id, 1.0)
+
+        # Agregar líneas de factura
         for product in products:
-            account_move_line_obj.create({
-                'move_id': invoice.id,
-                'product_id': product.id,
-                'quantity': task.total_m3,
-                'days_storage': task.days_to_invoiced, # Días de almacenamiento del stock
-                'price_unit': product.lst_price,
-                'name': f"{product.name} - {task.name} - {task.total_m3} m3 - {task.days_to_invoiced} días",
-                'account_id': product.categ_id.property_account_income_categ_id.id,
-                'task_id': task.id,  # Relación directa con la tarea
-            })
+            # Determinar si el producto requiere cálculo personalizado
+            calculate_custom = product.product_tmpl_id.is_storage or product.product_tmpl_id.fob_total
 
-        # **Actualizar los precios de las líneas según la lista de precios**
+            if product.product_tmpl_id.fob_total:
+                quantity = 1
+                name = f"{product.name} - {task.name} - Fob total:{task.total_fob} - USD:{rate}"
+                fob_total = task.total_fob
+
+                account_move_line_obj.create({
+                    'move_id': invoice.id,
+                    'product_id': product.id,
+                    'quantity': quantity,
+                    'calculate_custom': calculate_custom,
+                    'fob_total': fob_total,
+                    'name': name,
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
+                    'task_id': task.id,
+                })
+
+            elif product.product_tmpl_id.is_storage:
+                quantity = task.total_m3 or 1
+                name = f"{product.name} - {task.name} - {quantity} m3 - {task.days_to_invoiced} días"
+
+                account_move_line_obj.create({
+                    'move_id': invoice.id,
+                    'product_id': product.id,
+                    'quantity': quantity,
+                    'days_storage': task.days_to_invoiced,
+                    'calculate_custom': calculate_custom,
+                    'price_unit': product.lst_price,
+                    'name': name,
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
+                    'task_id': task.id,
+                })
+
+            else:
+                # Productos normales
+                account_move_line_obj.create({
+                    'move_id': invoice.id,
+                    'product_id': product.id,
+                    'quantity': 1,
+                    'calculate_custom': False,
+                    'price_unit': product.lst_price,
+                    'name': f"{product.name} - {task.name}",
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
+                    'task_id': task.id,
+                })
+
+        # Actualizar precios según lista de precios
         try:
-            invoice.button_update_prices_from_pricelist()  # Llamar al método
-            _logger.info(f"Precios actualizados en la factura {invoice.id} según la lista de precios del cliente {task.partner_id.name}.")
+            invoice.button_update_prices_from_pricelist()
         except Exception as e:
-            _logger.error(f"Error al actualizar los precios para la factura {invoice.id}: {str(e)}")
+            _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
 
-        _logger.info(f"Tareas relacionadas con la factura {invoice.id}: {invoice.task_id.ids}")
+        return invoice
 
     # echo ok: sumarizar fob total en le producto seguros (revisar config producto) de todos los transitos que esten unificados en la factura. En el almacenamiento mensual desde tareas revisar que se haya implementado la linea del producto seguro (fob)
     def action_generate_monthly_invoices(self):
