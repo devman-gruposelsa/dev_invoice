@@ -9,6 +9,7 @@
         <field name="arch" type="xml">
           <field name="is_client" position="before">
             <field name="monthly_invoice" string="Unica factura mensual"/>
+            <field name="no_minimum_pricing"/>
           </field>
         </field>
     </record>

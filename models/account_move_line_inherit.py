@@ -88,64 +88,106 @@ class AccountMoveLineInherit(models.Model):
             if not line.calculate_custom or not line.product_id:
                 continue
 
-            # Obtener tasa de cambio USD al inicio
-            usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
-            rate = 1.0
-            if usd_currency:
-                rate_data = usd_currency._get_rates(self.env.company, fields.Date.context_today(self))
-                rate = 1 / rate_data.get(usd_currency.id, 1.0)
-                _logger.info(f"[CUSTOM DEBUG] Tasa de cambio USD: {rate}")
-
             product = line.product_id
+            # currency = line.currency_id or line.move_id.company_id.currency_id # For rounding if not using .write
+
             if product.product_tmpl_id.is_storage:
                 base_subtotal = line.quantity * line.days_storage * line.price_unit
-                
-                if base_subtotal < product.product_tmpl_id.min_price:
-                    # Ajustamos el precio unitario para que el subtotal sea exactamente el precio mínimo
-                    new_price_unit = product.product_tmpl_id.min_price / (line.quantity * line.days_storage)
-                    line.with_context(check_move_validity=False).write({
-                        'price_unit': round(new_price_unit, 6),
-                        'price_subtotal': product.product_tmpl_id.min_price
-                    })
-                    _logger.info(f"""[CUSTOM DEBUG] Ajuste a precio mínimo:
-                        - Precio unitario ajustado: {new_price_unit}
-                        - Subtotal final: {product.product_tmpl_id.min_price}
-                    """)
+                partner = line.move_id.partner_id
+                effective_min_price = 0.0
+                min_price_source = "None"
+
+                if not (partner and partner.no_minimum_pricing):
+                    special_min_rule = self.env['partner.product.special.minimum'].search([
+                        ('partner_id', '=', partner.id if partner else False),
+                        ('product_id', '=', product.id),
+                        ('company_id', '=', line.company_id.id or self.env.company.id)
+                    ], limit=1)
+
+                    if special_min_rule:
+                        effective_min_price = special_min_rule.special_min_price
+                        min_price_source = f"Special ({effective_min_price})"
+                    else:
+                        effective_min_price = product.product_tmpl_id.min_price
+                        min_price_source = f"Global ({effective_min_price})"
                 else:
-                    line.price_subtotal = round(base_subtotal, 2)
-                
+                    min_price_source = "Skipped due to partner setting"
+
+                _logger.info(f"[CUSTOM DEBUG _compute_price_subtotal] Storage Line {line.id} - Partner: {partner.name if partner else 'N/A'}, Product: {product.display_name}, BaseSubtotal: {base_subtotal}, EffectiveMinPrice: {effective_min_price}, Source: {min_price_source}")
+
+                if not (partner and partner.no_minimum_pricing) and effective_min_price > 0 and base_subtotal < effective_min_price:
+                    adjusted_price_unit = 0.0
+                    if line.quantity != 0 and line.days_storage != 0:
+                        adjusted_price_unit = effective_min_price / (line.quantity * line.days_storage)
+                    elif line.quantity != 0:
+                        adjusted_price_unit = effective_min_price / line.quantity
+                    elif line.days_storage != 0:
+                        adjusted_price_unit = effective_min_price / line.days_storage
+                    else:
+                        adjusted_price_unit = effective_min_price
+                    
+                    line.with_context(check_move_validity=False).write({
+                        'price_unit': round(adjusted_price_unit, 6),
+                        'price_subtotal': effective_min_price 
+                    })
+                    _logger.info(f"    Applied minimum price: {effective_min_price} (Source: {min_price_source})")
+                else:
+                    current_subtotal = line.currency_id.round(base_subtotal) if line.currency_id else round(base_subtotal, 2)
+                    if line.price_subtotal != current_subtotal:
+                         line.price_subtotal = current_subtotal
+                    _logger.info(f"    No minimum price applied or base_subtotal is greater. Final subtotal: {line.price_subtotal} (MinPrice skipped reason: {min_price_source})")
                 continue
 
-            # Cálculo para productos FOB
-            if product.product_tmpl_id.fob_total:
-                subtotal = line.fob_total * rate * 0.001
-                _logger.info(f"[CUSTOM DEBUG] Cálculo FOB - fob total: {line.fob_total} * Rate: {rate} * 0.001")
-                
-                if subtotal < product.product_tmpl_id.min_price:
-                    subtotal = product.product_tmpl_id.min_price
-                    _logger.info(f"[CUSTOM DEBUG] Se aplica precio mínimo: {subtotal}")
+            elif product.product_tmpl_id.fob_total:
+                usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
+                rate = 1.0
+                if usd_currency:
+                    company = line.move_id.company_id or self.env.company
+                    date = line.move_id.date or fields.Date.context_today(line)
+                    # Ensure rate_data is checked for the currency's existence
+                    rate_data = usd_currency._get_rates(company, date)
+                    if usd_currency.id in rate_data:
+                         rate = 1 / rate_data[usd_currency.id]
+                    else:
+                        _logger.warning(f"Rate for USD not found for date {date} and company {company.name}. Defaulting to 1.0.")
 
-            # Cálculo para productos de almacenamiento
-            elif product.product_tmpl_id.is_storage:
-                # Calculamos el subtotal normal
-                base_subtotal = line.quantity * line.days_storage * line.price_unit
-                
-                # Aplicamos el precio mínimo si corresponde
-                line.price_subtotal = max(base_subtotal, product.product_tmpl_id.min_price)
-                
-                _logger.info(f"""[CUSTOM DEBUG] Cálculo Storage:
-                    - Base subtotal: {base_subtotal}
-                    - Precio mínimo: {product.product_tmpl_id.min_price}
-                    - Subtotal final: {line.price_subtotal}
-                """)
+                calculated_fob_subtotal = (line.fob_total or 0.0) * rate * 0.001
+                partner = line.move_id.partner_id
+                effective_min_price = 0.0
+                min_price_source = "None"
+                final_subtotal = calculated_fob_subtotal # Start with calculated
 
-            else:
-                _logger.info("[CUSTOM DEBUG] No aplica cálculo especial")
+                if not (partner and partner.no_minimum_pricing):
+                    special_min_rule = self.env['partner.product.special.minimum'].search([
+                        ('partner_id', '=', partner.id if partner else False),
+                        ('product_id', '=', product.id),
+                        ('company_id', '=', line.company_id.id or self.env.company.id)
+                    ], limit=1)
+
+                    if special_min_rule:
+                        effective_min_price = special_min_rule.special_min_price
+                        min_price_source = f"Special ({effective_min_price})"
+                    else:
+                        effective_min_price = product.product_tmpl_id.min_price
+                        min_price_source = f"Global ({effective_min_price})"
+                else:
+                    min_price_source = "Skipped due to partner setting"
+                
+                _logger.info(f"[CUSTOM DEBUG _compute_price_subtotal] FOB Line {line.id} - Partner: {partner.name if partner else 'N/A'}, Product: {product.display_name}, CalculatedFOBSubtotal: {calculated_fob_subtotal}, EffectiveMinPrice: {effective_min_price}, Source: {min_price_source}")
+
+                if not (partner and partner.no_minimum_pricing) and effective_min_price > 0 and calculated_fob_subtotal < effective_min_price:
+                    final_subtotal = effective_min_price
+                    _logger.info(f"    Applied minimum price: {effective_min_price} (Source: {min_price_source})")
+                else:
+                    _logger.info(f"    No minimum price applied or calculated_fob_subtotal is greater. Final subtotal: {final_subtotal} (MinPrice skipped reason: {min_price_source})")
+                
+                current_rounded_subtotal = line.currency_id.round(final_subtotal) if line.currency_id else round(final_subtotal, 2)
+                if line.price_subtotal != current_rounded_subtotal:
+                    line.price_subtotal = current_rounded_subtotal
                 continue
-
-            # Actualizamos el subtotal
-            line.price_subtotal = subtotal
-            _logger.info(f"[CUSTOM DEBUG] Subtotal final: {subtotal}")
+            
+            # Fallback for other custom types if any, or if super() handled it.
+            # If no specific custom logic applies here beyond what super() did, this is fine.
 
     @api.depends('quantity', 'price_unit', 'product_id', 'days_storage', 'calculate_custom', 'move_id.currency_id', 'move_id.date')
     def _compute_custom_subtotal(self):
@@ -166,22 +208,56 @@ class AccountMoveLineInherit(models.Model):
 
             # Cálculo para productos FOB
             if product.product_tmpl_id.fob_total:
-                subtotal = line.fob_total * rate * 0.001
-                _logger.info(f"[CUSTOM DEBUG] Cálculo FOB - fob total: {line.fob_total} * Rate: {rate} * 0.001 = {subtotal}")
+                subtotal = (line.fob_total or 0.0) * rate * 0.001
+                partner = line.move_id.partner_id
+                effective_min_price = 0.0
+                min_price_source = "None"
 
-                if subtotal < product.product_tmpl_id.min_price:
-                    subtotal = product.product_tmpl_id.min_price
-                    _logger.info(f"[CUSTOM DEBUG] Se aplica precio mínimo FOB: {subtotal}")
+                if not (partner and partner.no_minimum_pricing):
+                    special_min_rule = self.env['partner.product.special.minimum'].search([
+                        ('partner_id', '=', partner.id if partner else False),
+                        ('product_id', '=', product.id),
+                        ('company_id', '=', line.company_id.id or self.env.company.id)
+                    ], limit=1)
+                    if special_min_rule:
+                        effective_min_price = special_min_rule.special_min_price
+                        min_price_source = f"Special ({effective_min_price})"
+                    else:
+                        effective_min_price = product.product_tmpl_id.min_price
+                        min_price_source = f"Global ({effective_min_price})"
+                else:
+                    min_price_source = "Skipped due to partner setting"
 
-            # Cálculo para productos de almacenamiento
+                _logger.info(f"[CUSTOM DEBUG _compute_custom_subtotal] FOB Line {line.id} - Calculated: {subtotal}, EffectiveMin: {effective_min_price}, Source: {min_price_source}")
+                if not (partner and partner.no_minimum_pricing) and effective_min_price > 0 and subtotal < effective_min_price:
+                    subtotal = effective_min_price
+                    _logger.info(f"    Applied minimum: {subtotal}")
+
             elif product.product_tmpl_id.is_storage:
                 subtotal = line.quantity * line.days_storage * line.price_unit
-                _logger.info(f"[CUSTOM DEBUG] Cálculo Storage - Cantidad: {line.quantity} * Días: {line.days_storage} * Precio: {line.price_unit} = {subtotal}")
-                
-                if subtotal < product.product_tmpl_id.min_price:
-                    subtotal = product.product_tmpl_id.min_price
-                    _logger.info(f"[CUSTOM DEBUG] Se aplica precio mínimo Storage: {subtotal}")
+                partner = line.move_id.partner_id
+                effective_min_price = 0.0
+                min_price_source = "None"
 
+                if not (partner and partner.no_minimum_pricing):
+                    special_min_rule = self.env['partner.product.special.minimum'].search([
+                        ('partner_id', '=', partner.id if partner else False),
+                        ('product_id', '=', product.id),
+                        ('company_id', '=', line.company_id.id or self.env.company.id)
+                    ], limit=1)
+                    if special_min_rule:
+                        effective_min_price = special_min_rule.special_min_price
+                        min_price_source = f"Special ({effective_min_price})"
+                    else:
+                        effective_min_price = product.product_tmpl_id.min_price
+                        min_price_source = f"Global ({effective_min_price})"
+                else:
+                    min_price_source = "Skipped due to partner setting"
+
+                _logger.info(f"[CUSTOM DEBUG _compute_custom_subtotal] Storage Line {line.id} - Calculated: {subtotal}, EffectiveMin: {effective_min_price}, Source: {min_price_source}")
+                if not (partner and partner.no_minimum_pricing) and effective_min_price > 0 and subtotal < effective_min_price:
+                    subtotal = effective_min_price
+                    _logger.info(f"    Applied minimum: {subtotal}")
             else:
                 subtotal = line.price_unit * line.quantity
                 _logger.info(f"[CUSTOM DEBUG] Cálculo normal: {subtotal}")

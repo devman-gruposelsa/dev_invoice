@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Search View -->
+    <record id="view_partner_product_special_minimum_search" model="ir.ui.view">
+        <field name="name">partner.product.special.minimum.search</field>
+        <field name="model">partner.product.special.minimum</field>
+        <field name="arch" type="xml">
+            <search string="Search Special Minimums">
+                <field name="partner_id"/>
+                <field name="product_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <group expand="0" string="Group By">
+                    <filter string="Partner" name="group_by_partner" context="{'group_by':'partner_id'}"/>
+                    <filter string="Product" name="group_by_product" context="{'group_by':'product_id'}"/>
+                    <filter string="Company" name="group_by_company" context="{'group_by':'company_id'}" groups="base.group_multi_company"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Tree View -->
+    <record id="view_partner_product_special_minimum_tree" model="ir.ui.view">
+        <field name="name">partner.product.special.minimum.tree</field>
+        <field name="model">partner.product.special.minimum</field>
+        <field name="arch" type="xml">
+            <tree string="Partner-Specific Minimum Product Prices">
+                <field name="partner_id"/>
+                <field name="product_id"/>
+                <field name="special_min_price"/>
+                <field name="company_id" groups="base.group_multi_company" optional="show"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_partner_product_special_minimum_form" model="ir.ui.view">
+        <field name="name">partner.product.special.minimum.form</field>
+        <field name="model">partner.product.special.minimum</field>
+        <field name="arch" type="xml">
+            <form string="Partner-Specific Minimum Product Price">
+                <sheet>
+                    <group>
+                        <field name="partner_id" options="{'no_create': True, 'no_open': True}"/>
+                        <field name="product_id" options="{'no_create': True, 'no_open': True}"/>
+                        <field name="special_min_price"/>
+                        <field name="company_id" groups="base.group_multi_company" options="{'no_create': True, 'no_open': True}"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_partner_product_special_minimum" model="ir.actions.act_window">
+        <field name="name">Partner Product Minimums</field>
+        <field name="res_model">partner.product.special.minimum</field>
+        <field name="view_mode">tree,form</field>
+        <field name="search_view_id" ref="view_partner_product_special_minimum_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Define partner-specific minimum prices for products.
+            </p><p>
+                These rules allow you to set a different minimum billing amount for a specific product when invoiced to a particular partner, overriding the product's global minimum price.
+            </p>
+        </field>
+    </record>
+
+    <!-- Menu Item (Example: under Sales > Configuration) -->
+    <menuitem id="menu_partner_product_special_minimum_config"
+              name="Partner Product Minimums"
+              parent="sale.menu_sale_config" 
+              action="action_partner_product_special_minimum"
+              sequence="100"
+              groups="sales_team.group_sale_manager,account.group_account_manager"/>
+</odoo>

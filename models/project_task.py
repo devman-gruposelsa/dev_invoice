@@ -4,6 +4,7 @@ import logging
 from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError
 from datetime import timedelta
+import calendar
 
 _logger = logging.getLogger(__name__)
 
@@ -112,11 +113,9 @@ class ProjectTask(models.Model):
                 raise ValidationError(f"La tarea {task.name} no tiene definida la fecha de ingreso.")
 
             # Buscar productos asociados al campo específico
-            domain = [('product_tmpl_id.' + product_pack_field, '=', True)]
-            if task.is_imo:
-                domain.append(('is_imo', '=', True))  # Filtrar solo productos con is_imo=True si la tarea tiene is_imo=True
-            else:
-                domain.append(('is_imo', '=', False))  # Filtrar solo productos con is_imo=False si la tarea no tiene is_imo=True
+            base_domain = [('product_tmpl_id.' + product_pack_field, '=', True)]
+            imo_general_domain = ['|', ('product_tmpl_id.is_general', '=', True), '&', ('product_tmpl_id.is_general', '=', False), ('is_imo', '=', task.is_imo)]
+            domain = base_domain + imo_general_domain
 
             products = self.env['product.product'].search(domain)
             if not products:
@@ -244,11 +243,9 @@ class ProjectTask(models.Model):
                 raise ValidationError(f"Este tránsito no se puede facturar porque está en 'Egreso Completo'. (Tarea: {task.name})")
 
             # Buscar productos con el paquete de facturación de almacenamiento
-            domain = [('stock_invoice_pack', '=', True)]
-            if task.is_imo:
-                domain.append(('is_imo', '=', True))  # Filtrar solo productos con is_imo=True si la tarea tiene is_imo=True
-            else:
-                domain.append(('is_imo', '=', False))  # Filtrar solo productos con is_imo=False si la tarea no tiene is_imo=True
+            base_domain = [('stock_invoice_pack', '=', True)]
+            imo_general_domain = ['|', ('product_tmpl_id.is_general', '=', True), '&', ('product_tmpl_id.is_general', '=', False), ('is_imo', '=', task.is_imo)]
+            domain = base_domain + imo_general_domain
 
             products = self.env['product.product'].search(domain)
             if not products:
@@ -304,25 +301,22 @@ class ProjectTask(models.Model):
             ingreso_anio = task.fecha_ingreso.year
 
             # Obtener el total de días del mes actual
-            ultimo_dia_mes = invoice_date.replace(day=1)
-            if invoice_date.month == 12:
-                ultimo_dia_mes = ultimo_dia_mes.replace(year=invoice_date.year + 1, month=1)
-            else:
-                ultimo_dia_mes = ultimo_dia_mes.replace(month=invoice_date.month + 1)
-            days_in_month = (ultimo_dia_mes - invoice_date.replace(day=1)).days
+            # invoice_date is already a date object here
+            # days_in_invoice_full_month calculation
+            _, days_in_invoice_full_month = calendar.monthrange(invoice_date.year, invoice_date.month)
             
-            _logger.info(f"Días totales del mes {invoice_date.strftime('%B')}: {days_in_month}")
+            _logger.info(f"Días totales del mes {invoice_date.strftime('%B')}: {days_in_invoice_full_month}")
 
             # Agregar líneas de factura
             for product in products:
                 if product.product_tmpl_id.fob_total:
-                    # Si la fecha de factura es diferente al mes de ingreso, agregar el producto
-                    if factura_mes != ingreso_mes and factura_anio == ingreso_anio or factura_anio != ingreso_anio:
+                    # No agregar la línea FOB si task.fecha_ingreso es el mismo mes y año que invoice_date
+                    if task.fecha_ingreso and not (invoice.invoice_date.month == task.fecha_ingreso.month and invoice.invoice_date.year == task.fecha_ingreso.year):
                         quantity = 1
                         fob_total = task.total_fob
-                        calculate_custom = True
+                        calculate_custom = True # This should be true for FOB lines if they have custom logic
                         name = f"{task.name} - Fob total:{task.total_fob} - USD:{rate}"
-                        _logger.info(f"Agregando producto FOB - Tipo de cambio {rate} - Total FOB {task.total_fob}")
+                        _logger.info(f"Agregando producto FOB - Tipo de cambio {rate} - Total FOB {task.total_fob} - Fecha Ingreso: {task.fecha_ingreso} - Fecha Factura: {invoice.invoice_date}")
 
                         account_move_line_obj.create({
                             'move_id': invoice.id,
@@ -334,35 +328,63 @@ class ProjectTask(models.Model):
                             'account_id': product.categ_id.property_account_income_categ_id.id,
                             'task_id': task.id,
                         })
+                    else:
+                        _logger.info(f"Producto FOB {product.name} omitido para la tarea {task.name} porque task.fecha_ingreso ({task.fecha_ingreso}) está en el mismo mes/año que invoice_date ({invoice.invoice_date})")
 
                 elif product.product_tmpl_id.is_storage:
-                    # Calcular el precio basado en total_m3 * days_in_month * lst_price
-                    quantity = task.total_m3
-                    subtotal = quantity * days_in_month * product.lst_price
-                    calculate_custom = True
-                    
-                    if subtotal < product.product_tmpl_id.min_price:
-                        # Ajustamos el price_unit para que al multiplicar por la cantidad dé el min_price exacto
-                        price_unit = product.product_tmpl_id.min_price / (quantity if quantity > 0 else 1)
-                        price_subtotal = product.product_tmpl_id.min_price
+                    current_task_storage_days = 0
+                    if task.fecha_ingreso:
+                        # invoice.invoice_date is invoice_date in this scope
+                        if invoice_date.year == task.fecha_ingreso.year and invoice_date.month == task.fecha_ingreso.month:
+                            _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
+                            last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
+                            current_task_storage_days = (last_day_of_invoice_month_date - task.fecha_ingreso).days + 1
+                        else: # Entry date is in a previous month/year
+                            current_task_storage_days = days_in_invoice_full_month
                     else:
-                        price_unit = days_in_month * product.lst_price
-                        price_subtotal = subtotal
+                        # Default to full month if fecha_ingreso is somehow not set (though validated earlier)
+                        current_task_storage_days = days_in_invoice_full_month
+                        _logger.warning(f"Tarea {task.name} no tiene fecha_ingreso definida al calcular días de almacenaje. Usando mes completo: {current_task_storage_days} días.")
 
-                    name = f"{product.name} - {task.name} - {task.total_m3} m3 - {days_in_month} días"
+                    quantity = task.total_m3 or 1.0 # Ensure quantity is not zero
+                    calculate_custom = True # For storage products, custom calculation is expected in account.move.line
                     
+                    # Determine daily rate: from pricelist or fallback to product's list_price
+                    daily_rate_to_use = product.product_tmpl_id.list_price # Default fallback
+                    if invoice.pricelist_id:
+                        price_context_quantity = quantity if quantity > 0 else 1 # Pricelist rules might need qty > 0
+                        price_context = {
+                            'pricelist': invoice.pricelist_id.id,
+                            'partner': invoice.partner_shipping_id.id or invoice.partner_id.id,
+                            'quantity': price_context_quantity,
+                            'date': invoice.invoice_date,
+                            'uom': product.uom_id.id,
+                        }
+                        try:
+                            pricelist_rate = product.with_context(price_context).price
+                            if pricelist_rate is not False and pricelist_rate != daily_rate_to_use: # Check if a different price was found
+                                daily_rate_to_use = pricelist_rate
+                                _logger.info(f"Storage product {product.name} (Task: {task.name}): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name}")
+                            else:
+                                _logger.info(f"Storage product {product.name} (Task: {task.name}): Pricelist {invoice.pricelist_id.name} did not return a specific rate, using fallback/default list price {daily_rate_to_use}.")
+                        except Exception as e:
+                            _logger.error(f"Error fetching price from pricelist for product {product.name} (Task: {task.name}): {e}. Using fallback list price {daily_rate_to_use}.")
+                    else:
+                        _logger.info(f"Storage product {product.name} (Task: {task.name}): No pricelist on invoice. Using product list price {daily_rate_to_use} as daily rate.")
+
+                    name = f"{product.name} - {task.name} - {quantity} m3 - {current_task_storage_days} días"
+
                     account_move_line_obj.create({
                         'move_id': invoice.id,
                         'product_id': product.id,
-                        'quantity': quantity,
-                        'days_storage': days_in_month,
+                        'quantity': quantity, # Actual m3 for the line
+                        'days_storage': current_task_storage_days,
                         'calculate_custom': calculate_custom,
-                        'price_unit': price_unit,
+                        'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                         'name': name,
                         'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
                     })
-
                 else:
                     # Para productos sin fob_total ni is_storage, usar el total_m3 como cantidad
                     quantity = 1
@@ -460,7 +482,10 @@ class ProjectTask(models.Model):
             raise ValidationError(f"Este tránsito no se puede facturar porque está en 'Egreso Completo'. (Tarea: {task.name})")
 
         # Buscar productos con el paquete de facturación de almacenamiento
-        products = self.env['product.product'].search([('stock_invoice_pack', '=', True)])
+        base_domain = [('stock_invoice_pack', '=', True)]
+        imo_general_domain = ['|', ('product_tmpl_id.is_general', '=', True), '&', ('product_tmpl_id.is_general', '=', False), ('is_imo', '=', task.is_imo)]
+        domain = base_domain + imo_general_domain
+        products = self.env['product.product'].search(domain)
         if not products:
             raise ValidationError(f"No hay productos configurados para facturación de almacenamiento para la tarea {task.name}.")
 
@@ -509,37 +534,80 @@ class ProjectTask(models.Model):
             calculate_custom = product.product_tmpl_id.is_storage or product.product_tmpl_id.fob_total
 
             if product.product_tmpl_id.fob_total:
-                quantity = 1
-                name = f"{product.name} - {task.name} - Fob total:{task.total_fob} - USD:{rate}"
-                fob_total = task.total_fob
+                # No agregar la línea FOB si task.fecha_ingreso es el mismo mes y año que invoice_date
+                if task.fecha_ingreso and not (invoice.invoice_date.month == task.fecha_ingreso.month and invoice.invoice_date.year == task.fecha_ingreso.year):
+                    quantity = 1
+                    name = f"{product.name} - {task.name} - Fob total:{task.total_fob} - USD:{rate}"
+                    fob_total = task.total_fob
 
-                account_move_line_obj.create({
-                    'move_id': invoice.id,
-                    'product_id': product.id,
-                    'quantity': quantity,
-                    'calculate_custom': calculate_custom,
-                    'fob_total': fob_total,
-                    'name': name,
-                    'account_id': product.categ_id.property_account_income_categ_id.id,
-                    'task_id': task.id,
-                })
+                    account_move_line_obj.create({
+                        'move_id': invoice.id,
+                        'product_id': product.id,
+                        'quantity': quantity,
+                        'calculate_custom': calculate_custom, # Ensure calculate_custom is defined correctly for this block
+                        'fob_total': fob_total,
+                        'name': name,
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        'task_id': task.id,
+                    })
+                else:
+                    _logger.info(f"Producto FOB {product.name} omitido para la tarea {task.name} en factura individual porque task.fecha_ingreso ({task.fecha_ingreso}) está en el mismo mes/año que invoice_date ({invoice.invoice_date})")
 
             elif product.product_tmpl_id.is_storage:
-                quantity = task.total_m3 or 1
-                name = f"{product.name} - {task.name} - {quantity} m3 - {task.days_to_invoiced} días"
+                current_task_storage_days = 0
+                # invoice.invoice_date is invoice_date in this method's scope
+                _, days_in_invoice_full_month = calendar.monthrange(invoice_date.year, invoice_date.month)
+
+                if task.fecha_ingreso:
+                    if invoice_date.year == task.fecha_ingreso.year and invoice_date.month == task.fecha_ingreso.month:
+                        _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
+                        last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
+                        current_task_storage_days = (last_day_of_invoice_month_date - task.fecha_ingreso).days + 1
+                    else: # Entry date is in a previous month/year
+                        current_task_storage_days = days_in_invoice_full_month
+                else:
+                    current_task_storage_days = days_in_invoice_full_month
+                    _logger.warning(f"Tarea {task.name} no tiene fecha_ingreso definida al calcular días de almacenaje para factura individual. Usando mes completo: {current_task_storage_days} días.")
+
+                quantity = task.total_m3 or 1.0
+                # calculate_custom is already defined based on product.product_tmpl_id.is_storage or fob_total
+
+                # Determine daily rate: from pricelist or fallback to product's list_price
+                daily_rate_to_use = product.product_tmpl_id.list_price # Default fallback
+                if invoice.pricelist_id:
+                    price_context_quantity = quantity if quantity > 0 else 1 # Pricelist rules might need qty > 0
+                    price_context = {
+                        'pricelist': invoice.pricelist_id.id,
+                        'partner': invoice.partner_shipping_id.id or invoice.partner_id.id,
+                        'quantity': price_context_quantity,
+                        'date': invoice.invoice_date,
+                        'uom': product.uom_id.id,
+                    }
+                    try:
+                        pricelist_rate = product.with_context(price_context).price
+                        if pricelist_rate is not False and pricelist_rate != daily_rate_to_use: # Check if a different price was found
+                            daily_rate_to_use = pricelist_rate
+                            _logger.info(f"Storage product {product.name} (Task: {task.name}, Single Invoice): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name}")
+                        else:
+                            _logger.info(f"Storage product {product.name} (Task: {task.name}, Single Invoice): Pricelist {invoice.pricelist_id.name} did not return a specific rate, using fallback/default list price {daily_rate_to_use}.")
+                    except Exception as e:
+                        _logger.error(f"Error fetching price from pricelist for product {product.name} (Task: {task.name}, Single Invoice): {e}. Using fallback list price {daily_rate_to_use}.")
+                else:
+                    _logger.info(f"Storage product {product.name} (Task: {task.name}, Single Invoice): No pricelist on invoice. Using product list price {daily_rate_to_use} as daily rate.")
+
+                name = f"{product.name} - {task.name} - {quantity} m3 - {current_task_storage_days} días"
 
                 account_move_line_obj.create({
                     'move_id': invoice.id,
                     'product_id': product.id,
                     'quantity': quantity,
-                    'days_storage': task.days_to_invoiced,
+                    'days_storage': current_task_storage_days, # Changed from task.days_to_invoiced
                     'calculate_custom': calculate_custom,
-                    'price_unit': product.lst_price,
+                    'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                     'name': name,
                     'account_id': product.categ_id.property_account_income_categ_id.id,
                     'task_id': task.id,
                 })
-
             else:
                 # Productos normales
                 account_move_line_obj.create({
@@ -600,12 +668,8 @@ class ProjectTask(models.Model):
             anio_factura = invoice_date.strftime('%Y')
             
             # Calcular días del mes
-            ultimo_dia_mes = invoice_date.replace(day=1)
-            if invoice_date.month == 12:
-                ultimo_dia_mes = ultimo_dia_mes.replace(year=invoice_date.year + 1, month=1)
-            else:
-                ultimo_dia_mes = ultimo_dia_mes.replace(month=invoice_date.month + 1)
-            days_in_month = (ultimo_dia_mes - invoice_date.replace(day=1)).days
+            # invoice_date is already a date object
+            _, days_in_invoice_full_month = calendar.monthrange(invoice_date.year, invoice_date.month)
 
             # Preparar narración
             inicio_periodo = invoice_date.replace(day=1).strftime('%d/%m/%Y')
@@ -631,10 +695,9 @@ class ProjectTask(models.Model):
             })
 
             # Obtener productos según IMO
-            domain = [
-                ('stock_invoice_pack', '=', True),
-                ('is_imo', '=', is_imo)
-            ]
+            base_domain = [('stock_invoice_pack', '=', True)]
+            imo_general_domain = ['|', ('product_tmpl_id.is_general', '=', True), '&', ('product_tmpl_id.is_general', '=', False), ('is_imo', '=', is_imo)]
+            domain = base_domain + imo_general_domain
             products = self.env['product.product'].search(domain)
 
             # Obtener tasa de cambio USD
@@ -646,48 +709,84 @@ class ProjectTask(models.Model):
             # Procesar productos
             for product in products:
                 if product.product_tmpl_id.fob_total:
-                    # Sumarizar FOB de todas las tareas
-                    total_fob = 0
-                    task_details = []
-                    for task in tasks:
-                        if task.total_fob:
-                            total_fob += task.total_fob
-                            task_details.append(f"{task.name}: {task.total_fob}")
-
-                    if total_fob > 0:
-                        name = f"FOB Total - {' | '.join(task_details)} - USD:{rate}"
+                    total_fob_for_invoice = 0
+                    task_details_for_invoice = []
+                    # invoice_date is defined earlier in this method
+                    for task_in_group in tasks: # 'tasks' is the list of tasks for the current group
+                        if task_in_group.total_fob and task_in_group.fecha_ingreso:
+                            if not (invoice.invoice_date.month == task_in_group.fecha_ingreso.month and invoice.invoice_date.year == task_in_group.fecha_ingreso.year):
+                                total_fob_for_invoice += task_in_group.total_fob
+                                task_details_for_invoice.append(f"{task_in_group.name}: {task_in_group.total_fob}")
+                            else:
+                                _logger.info(f"FOB para tarea {task_in_group.name} omitido en factura agrupada porque fecha_ingreso ({task_in_group.fecha_ingreso}) es mismo mes/año que fecha factura ({invoice.invoice_date})")
+                    
+                    if total_fob_for_invoice > 0:
+                        name = f"FOB Total - {' | '.join(task_details_for_invoice)} - USD:{rate}"
                         self.env['account.move.line'].create({
                             'move_id': invoice.id,
                             'product_id': product.id,
                             'quantity': 1,
                             'calculate_custom': True,
-                            'fob_total': total_fob,
+                            'fob_total': total_fob_for_invoice,
                             'name': name,
                             'account_id': product.categ_id.property_account_income_categ_id.id,
+                            # No task_id here as it's a consolidated line for multiple tasks
                         })
 
                 elif product.product_tmpl_id.is_storage:
                     # Crear línea por cada tarea para storage
-                    for task in tasks:
-                        subtotal = task.total_m3 * days_in_month * product.lst_price
-                        if subtotal < product.product_tmpl_id.min_price:
-                            price_subtotal = product.product_tmpl_id.min_price
+                    for task_in_group in tasks: # Renamed 'task' to 'task_in_group' to avoid conflict with outer scope if any
+                        current_task_storage_days = 0
+                        if task_in_group.fecha_ingreso:
+                            # invoice.invoice_date is invoice_date in this scope
+                            if invoice_date.year == task_in_group.fecha_ingreso.year and invoice_date.month == task_in_group.fecha_ingreso.month:
+                                _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
+                                last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
+                                current_task_storage_days = (last_day_of_invoice_month_date - task_in_group.fecha_ingreso).days + 1
+                            else: # Entry date is in a previous month/year
+                                current_task_storage_days = days_in_invoice_full_month
                         else:
-                            price_subtotal = subtotal
+                            current_task_storage_days = days_in_invoice_full_month
+                            _logger.warning(f"Tarea {task_in_group.name} no tiene fecha_ingreso definida al calcular días de almacenaje para factura agrupada. Usando mes completo: {current_task_storage_days} días.")
 
-                        name = f"{product.name} - {task.name} - {task.total_m3} m3 - {days_in_month} días"
+                        quantity = task_in_group.total_m3 or 1.0
+                        
+                        # Determine daily rate: from pricelist or fallback to product's list_price
+                        daily_rate_to_use = product.product_tmpl_id.list_price # Default fallback
+                        if invoice.pricelist_id:
+                            price_context_quantity = quantity if quantity > 0 else 1 # Pricelist rules might need qty > 0
+                            price_context = {
+                                'pricelist': invoice.pricelist_id.id,
+                                'partner': invoice.partner_shipping_id.id or invoice.partner_id.id, # partner from the invoice
+                                'quantity': price_context_quantity,
+                                'date': invoice.invoice_date,
+                                'uom': product.uom_id.id,
+                            }
+                            try:
+                                pricelist_rate = product.with_context(price_context).price
+                                if pricelist_rate is not False and pricelist_rate != daily_rate_to_use: # Check if a different price was found
+                                    daily_rate_to_use = pricelist_rate
+                                    _logger.info(f"Storage product {product.name} (Task: {task_in_group.name}, Grouped Invoice): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name}")
+                                else:
+                                    _logger.info(f"Storage product {product.name} (Task: {task_in_group.name}, Grouped Invoice): Pricelist {invoice.pricelist_id.name} did not return a specific rate, using fallback/default list price {daily_rate_to_use}.")
+                            except Exception as e:
+                                _logger.error(f"Error fetching price from pricelist for product {product.name} (Task: {task_in_group.name}, Grouped Invoice): {e}. Using fallback list price {daily_rate_to_use}.")
+                        else:
+                             _logger.info(f"Storage product {product.name} (Task: {task_in_group.name}, Grouped Invoice): No pricelist on invoice. Using product list price {daily_rate_to_use} as daily rate.")
+
+                        name = f"{product.name} - {task_in_group.name} - {quantity} m3 - {current_task_storage_days} días"
+
                         self.env['account.move.line'].create({
                             'move_id': invoice.id,
                             'product_id': product.id,
-                            'quantity': task.total_m3,
-                            'days_storage': days_in_month,
+                            'quantity': quantity,
+                            'days_storage': current_task_storage_days,
                             'calculate_custom': True,
-                            'price_unit': price_subtotal,
+                            'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                             'name': name,
                             'account_id': product.categ_id.property_account_income_categ_id.id,
-                            'task_id': task.id,
+                            'task_id': task_in_group.id,
                         })
-
                 else:
                     # Productos normales
                     for task in tasks:
