@@ -114,9 +114,15 @@ class ProjectTask(models.Model):
             # Buscar productos asociados al campo específico
             domain = [('product_tmpl_id.' + product_pack_field, '=', True)]
             if task.is_imo:
-                domain.append(('is_imo', '=', True))  # Filtrar solo productos con is_imo=True si la tarea tiene is_imo=True
+                domain.extend(['|', 
+                    ('product_tmpl_id.is_imo', '=', True),
+                    ('product_tmpl_id.is_general', '=', True)
+                ])
             else:
-                domain.append(('is_imo', '=', False))  # Filtrar solo productos con is_imo=False si la tarea no tiene is_imo=True
+                domain.extend(['|',
+                    ('product_tmpl_id.is_imo', '=', False),
+                    ('product_tmpl_id.is_general', '=', True)
+                ])
 
             products = self.env['product.product'].search(domain)
             if not products:
@@ -246,9 +252,15 @@ class ProjectTask(models.Model):
             # Buscar productos con el paquete de facturación de almacenamiento
             domain = [('stock_invoice_pack', '=', True)]
             if task.is_imo:
-                domain.append(('is_imo', '=', True))  # Filtrar solo productos con is_imo=True si la tarea tiene is_imo=True
+                domain.extend(['|',
+                    ('product_tmpl_id.is_imo', '=', True),
+                    ('product_tmpl_id.is_general', '=', True)
+                ])
             else:
-                domain.append(('is_imo', '=', False))  # Filtrar solo productos con is_imo=False si la tarea no tiene is_imo=True
+                domain.extend(['|',
+                    ('product_tmpl_id.is_imo', '=', False),
+                    ('product_tmpl_id.is_general', '=', True)
+                ])
 
             products = self.env['product.product'].search(domain)
             if not products:
