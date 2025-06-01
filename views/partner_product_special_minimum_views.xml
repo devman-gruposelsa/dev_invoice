@@ -68,7 +68,7 @@
     <!-- Menu Item (Example: under Sales > Configuration) -->
     <menuitem id="menu_partner_product_special_minimum_config"
               name="Partner Product Minimums"
-              parent="sale.menu_sale_config" 
+              parent="sale.menu_sale_config"
               action="action_partner_product_special_minimum"
               sequence="100"
               groups="sales_team.group_sale_manager,account.group_account_manager"/>

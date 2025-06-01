@@ -6,7 +6,7 @@
     'author': '',
     'website': '',
     'category': '',
-    'depends': ['base', 'product', 'sale', 'project', 'import_folder_016', 'dev_insurances', 'dev_stock', 'exe_selsa_commission', 'account_invoice_pricelist', 'decimal_precision'],
+    'depends': ['base', 'product', 'sale', 'project', 'import_folder_016', 'dev_insurances', 'dev_stock', 'exe_selsa_commission', 'account_invoice_pricelist'],
     "data": [
         "security/ir.model.access.csv",
         "views/project_task_views.xml",
