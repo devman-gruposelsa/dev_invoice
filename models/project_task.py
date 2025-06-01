@@ -823,7 +823,7 @@ class ProjectTask(models.Model):
             return True
 
         action_vals = {
-            'name': 'Generated Monthly Invoices (Testing)',
+            'name': _('Generated Monthly Invoices'),
             'domain': [('id', 'in', created_invoice_ids)],
             'res_model': 'account.move',
             'type': 'ir.actions.act_window',

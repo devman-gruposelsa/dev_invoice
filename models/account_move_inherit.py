@@ -50,35 +50,35 @@ class AccountMoveInherit(models.Model):
     @api.model
     def create(self, vals):
         record = super(AccountMoveInherit, self).create(vals)
-        record._update_task_relations()
+        # record._update_task_relations() # Removed
         return record
 
     def write(self, vals):
         res = super(AccountMoveInherit, self).write(vals)
-        if 'invoice_line_ids' in vals:
-            self._update_task_relations()
+        # if 'invoice_line_ids' in vals: # Removed
+            # self._update_task_relations() # Removed
         return res
 
-    def _update_task_relations(self):
-        """
-        Actualiza las relaciones de tareas solo cuando es necesario
-        """
-        for rec in self:
-            task_ids = []
-            _logger.info(f"Actualizando relaciones de tareas para factura {rec.id}")
-            for line in rec.invoice_line_ids:
-                if line.task_id and line.task_id.project_id.importation:
-                    task_ids.append(line.task_id.id)
-                    _logger.info(f"Línea {line.id} asociada a la tarea {line.task_id.id}")
-                elif line.sale_id and line.sale_id.task_ids:
-                    for task in line.sale_id.task_ids:
-                        if task.project_id.importation:
-                            task_ids.append(task.id)
-                            _logger.info(f"Orden de venta {line.sale_id.id} asociada a la tarea {task.id}")
+    # def _update_task_relations(self): # Entire method removed
+    #     """
+    #     Actualiza las relaciones de tareas solo cuando es necesario
+    #     """
+    #     for rec in self:
+    #         task_ids = []
+    #         _logger.info(f"Actualizando relaciones de tareas para factura {rec.id}")
+    #         for line in rec.invoice_line_ids:
+    #             if line.task_id and line.task_id.project_id.importation:
+    #                 task_ids.append(line.task_id.id)
+    #                 _logger.info(f"Línea {line.id} asociada a la tarea {line.task_id.id}")
+    #             elif line.sale_id and line.sale_id.task_ids:
+    #                 for task in line.sale_id.task_ids:
+    #                     if task.project_id.importation:
+    #                         task_ids.append(task.id)
+    #                         _logger.info(f"Orden de venta {line.sale_id.id} asociada a la tarea {task.id}")
             
-            if set(task_ids) != set(rec.task_id.ids):
-                rec.task_id = [(6, 0, task_ids)]
-                _logger.info(f"Tareas actualizadas para factura {rec.id}: {task_ids}")
+    #         if set(task_ids) != set(rec.task_id.ids):
+    #             rec.task_id = [(6, 0, task_ids)]
+    #             _logger.info(f"Tareas actualizadas para factura {rec.id}: {task_ids}")
 
     def post(self):
         res = super(AccountMoveInherit, self).post()
@@ -112,29 +112,59 @@ class AccountMoveInherit(models.Model):
         Método para ser llamado por el cron que actualiza las relaciones entre facturas y tareas
         """
         _logger.info("Iniciando actualización programada de relaciones de facturas con tareas")
-        moves = self.search([])
-        count = 0
         
+        yesterday = fields.Datetime.now() - timedelta(days=1)
+        domain = [('write_date', '>=', yesterday)]
+        # Limit the number of records per cron run and order
+        moves = self.search(domain, limit=1000, order='write_date desc')
+        _logger.info(f"Cron job _cron_update_task_relations processing {len(moves)} invoices modified since {yesterday}.")
+
+        count = 0
+        processed_ids = []
+
         for move in moves:
             try:
-                task_ids = []
+                # The _compute_task_id method will be triggered automatically on write if dependencies change,
+                # or by a direct call if needed. For a cron, we might want to force recomputation
+                # if we suspect some relations were missed or to ensure correctness over time.
+                # However, if _compute_task_id is stored and its deps are correct, direct recomputation
+                # for all recent invoices might be redundant unless specifically needed for robustness.
+                # The original cron was trying to manually sync task_id.
+                # A simpler cron might just call `move.modified(['invoice_line_ids'])` or `move._compute_task_id()`
+                # if we want to force recomputation.
+                # For now, let's stick to the original intent of checking and updating if different.
+                # This ensures that if `_compute_task_id` didn't fire for some reason, it's corrected.
+
+                current_task_ids_in_db = set(move.task_id.ids) # Get current stored task_ids
+
+                # Recalculate what task_ids *should* be based on current lines
+                # This logic is similar to _compute_task_id but without direct assignment inside loop
+                expected_task_ids_list = []
                 for line in move.invoice_line_ids:
                     if line.task_id and line.task_id.project_id.importation:
-                        task_ids.append(line.task_id.id)
-                    elif line.sale_id and line.sale_id.task_ids:
-                        task_ids.extend(
+                        expected_task_ids_list.append(line.task_id.id)
+                    elif line.sale_id:
+                        expected_task_ids_list.extend(
                             task.id 
                             for task in line.sale_id.task_ids 
                             if task.project_id.importation
                         )
-                
-                if set(task_ids) != set(move.task_id.ids):
-                    move.task_id = [(6, 0, list(set(task_ids)))]
+                expected_task_ids_set = set(expected_task_ids_list)
+
+                if expected_task_ids_set != current_task_ids_in_db:
+                    # Use write with (6,0,...) to set the new list, this will trigger the compute if not already aligned.
+                    move.write({'task_id': [(6, 0, list(expected_task_ids_set))]})
+                    # Alternatively, if we are sure _compute_task_id is robust:
+                    # move._compute_task_id() # This would re-run the compute method
                     count += 1
-                    self.env.cr.commit()  # Commit por cada actualización exitosa
+                    processed_ids.append(move.id)
+                # Removed self.env.cr.commit() from here
                     
             except Exception as e:
-                _logger.error(f"Error al procesar factura {move.id}: {str(e)}")
-                self.env.cr.rollback()
+                _logger.error(f"Error al procesar factura {move.id} en cron _cron_update_task_relations: {str(e)}")
+                # self.env.cr.rollback() # Rollback is implicitly handled by Odoo per transaction
                 
-        _logger.info(f"Actualización completada. Se actualizaron {count} facturas")
+        if count > 0:
+            _logger.info(f"Actualización de relaciones de tareas completada por cron. Se actualizaron {count} facturas. IDs: {processed_ids}")
+        else:
+            _logger.info("Actualización de relaciones de tareas por cron: No se requirieron actualizaciones para las facturas procesadas.")
