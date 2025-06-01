@@ -677,7 +677,9 @@ class ProjectTask(models.Model):
 
             # Preparar narración
             inicio_periodo = invoice_date.replace(day=1).strftime('%d/%m/%Y')
-            fin_periodo = (ultimo_dia_mes - timedelta(days=1)).strftime('%d/%m/%Y')
+            # Calculate the last day of the current invoice month
+            last_day_of_current_month = invoice_date.replace(day=days_in_invoice_full_month)
+            fin_periodo = last_day_of_current_month.strftime('%d/%m/%Y')
             narration = (
                 "NOTA DE MENSUAL<br/>"
                 f"CORRESPONDE AL ALMACENAJE MENSUAL {mes_factura.upper()} {anio_factura}<br/>"
@@ -823,7 +825,7 @@ class ProjectTask(models.Model):
             return True
 
         action_vals = {
-            'name': _('Generated Monthly Invoices'),
+            'name': self.env._('Generated Monthly Invoices'),
             'domain': [('id', 'in', created_invoice_ids)],
             'res_model': 'account.move',
             'type': 'ir.actions.act_window',
