@@ -669,7 +669,7 @@ class ProjectTask(models.Model):
             
             # Calcular días del mes
             # invoice_date is already a date object
-            _, days_in_invoice_full_month = calendar.monthrange(invoice_date.year, invoice_date.month)
+            _unused_weekday, days_in_invoice_full_month = calendar.monthrange(invoice_date.year, invoice_date.month)
 
             # Preparar narración
             inicio_periodo = invoice_date.replace(day=1).strftime('%d/%m/%Y')
@@ -818,7 +818,7 @@ class ProjectTask(models.Model):
             return True
 
         action_vals = {
-            'name': self.env._('Generated Monthly Invoices'),
+            'name': _('Generated Monthly Invoices'),
             'domain': [('id', 'in', created_invoice_ids)],
             'res_model': 'account.move',
             'type': 'ir.actions.act_window',
