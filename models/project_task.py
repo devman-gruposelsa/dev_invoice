@@ -311,7 +311,7 @@ class ProjectTask(models.Model):
             for product in products:
                 if product.product_tmpl_id.fob_total:
                     # No agregar la línea FOB si task.fecha_ingreso es el mismo mes y año que invoice_date
-                    if task.fecha_ingreso and not (invoice.invoice_date.month == task.fecha_ingreso.month and invoice.invoice_date.year == task.fecha_ingreso.year):
+                    if task.fecha_ingreso and not (invoice.invoice_date.month == task.fecha_ingreso.date().month and invoice.invoice_date.year == task.fecha_ingreso.date().year):
                         quantity = 1
                         fob_total = task.total_fob
                         calculate_custom = True # This should be true for FOB lines if they have custom logic
@@ -334,11 +334,12 @@ class ProjectTask(models.Model):
                 elif product.product_tmpl_id.is_storage:
                     current_task_storage_days = 0
                     if task.fecha_ingreso:
+                        task_fecha_ingreso_date = task.fecha_ingreso.date()
                         # invoice.invoice_date is invoice_date in this scope
-                        if invoice_date.year == task.fecha_ingreso.year and invoice_date.month == task.fecha_ingreso.month:
+                        if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
                             _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
                             last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
-                            current_task_storage_days = (last_day_of_invoice_month_date - task.fecha_ingreso).days + 1
+                            current_task_storage_days = (last_day_of_invoice_month_date - task_fecha_ingreso_date).days + 1
                         else: # Entry date is in a previous month/year
                             current_task_storage_days = days_in_invoice_full_month
                     else:
@@ -534,7 +535,7 @@ class ProjectTask(models.Model):
 
             if product.product_tmpl_id.fob_total:
                 # No agregar la línea FOB si task.fecha_ingreso es el mismo mes y año que invoice_date
-                if task.fecha_ingreso and not (invoice.invoice_date.month == task.fecha_ingreso.month and invoice.invoice_date.year == task.fecha_ingreso.year):
+                if task.fecha_ingreso and not (invoice.invoice_date.month == task.fecha_ingreso.date().month and invoice.invoice_date.year == task.fecha_ingreso.date().year):
                     quantity = 1
                     name = f"{product.name} - {task.name} - Fob total:{task.total_fob} - USD:{rate}"
                     fob_total = task.total_fob
@@ -558,10 +559,11 @@ class ProjectTask(models.Model):
                 _, days_in_invoice_full_month = calendar.monthrange(invoice_date.year, invoice_date.month)
 
                 if task.fecha_ingreso:
-                    if invoice_date.year == task.fecha_ingreso.year and invoice_date.month == task.fecha_ingreso.month:
+                    task_fecha_ingreso_date = task.fecha_ingreso.date()
+                    if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
                         _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
                         last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
-                        current_task_storage_days = (last_day_of_invoice_month_date - task.fecha_ingreso).days + 1
+                        current_task_storage_days = (last_day_of_invoice_month_date - task_fecha_ingreso_date).days + 1
                     else: # Entry date is in a previous month/year
                         current_task_storage_days = days_in_invoice_full_month
                 else:
@@ -718,7 +720,7 @@ class ProjectTask(models.Model):
                     # invoice_date is defined earlier in this method
                     for task_in_group in tasks: # 'tasks' is the list of tasks for the current group
                         if task_in_group.total_fob and task_in_group.fecha_ingreso:
-                            if not (invoice.invoice_date.month == task_in_group.fecha_ingreso.month and invoice.invoice_date.year == task_in_group.fecha_ingreso.year):
+                            if not (invoice.invoice_date.month == task_in_group.fecha_ingreso.date().month and invoice.invoice_date.year == task_in_group.fecha_ingreso.date().year):
                                 total_fob_for_invoice += task_in_group.total_fob
                                 task_details_for_invoice.append(f"{task_in_group.name}: {task_in_group.total_fob}")
                             else:
@@ -742,11 +744,12 @@ class ProjectTask(models.Model):
                     for task_in_group in tasks: # Renamed 'task' to 'task_in_group' to avoid conflict with outer scope if any
                         current_task_storage_days = 0
                         if task_in_group.fecha_ingreso:
+                            task_fecha_ingreso_date = task_in_group.fecha_ingreso.date()
                             # invoice.invoice_date is invoice_date in this scope
-                            if invoice_date.year == task_in_group.fecha_ingreso.year and invoice_date.month == task_in_group.fecha_ingreso.month:
+                            if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
                                 _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
                                 last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
-                                current_task_storage_days = (last_day_of_invoice_month_date - task_in_group.fecha_ingreso).days + 1
+                                current_task_storage_days = (last_day_of_invoice_month_date - task_fecha_ingreso_date).days + 1
                             else: # Entry date is in a previous month/year
                                 current_task_storage_days = days_in_invoice_full_month
                         else:
