@@ -354,21 +354,22 @@ class ProjectTask(models.Model):
                     daily_rate_to_use = product.product_tmpl_id.list_price # Default fallback
                     if invoice.pricelist_id:
                         try:
-                            price_context = {
-                                'pricelist': invoice.pricelist_id.id,
-                                'date': invoice.invoice_date,
-                                'uom': product.uom_id.id,
-                                # Optional: 'quantity': quantity if quantity > 0 else 1,
-                                # Optional: 'partner': invoice.partner_id.id,
-                            }
-                            computed_price = product.with_context(price_context).price_compute('list_price')[product.id]
-                            if computed_price is not False:
-                                daily_rate_to_use = computed_price
-                                _logger.info(f"Storage product {product.name} (Task: {task.name}): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name}")
-                            else:
-                                _logger.info(f"Storage product {product.name} (Task: {task.name}): Pricelist {invoice.pricelist_id.name} did not return a specific rate (returned False), using fallback/default list price {daily_rate_to_use}.")
+                            partner_for_pricelist = invoice.partner_id.commercial_partner_id or invoice.partner_id
+                            quantity_for_price_rule = quantity if quantity > 0 else 1.0
+
+                            daily_rate_to_use = invoice.pricelist_id.get_product_price(
+                                product,
+                                quantity_for_price_rule,
+                                partner_for_pricelist,
+                                date=invoice.invoice_date,
+                                uom_id=product.uom_id.id
+                            )
+                            _logger.info(f"Storage product {product.name} (Task: {task.name}): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name} method get_product_price().")
+                            # get_product_price usually returns list_price if no rule matches, so direct assignment is fine.
+                            # No need to check for False unless specific pricelist versions behave differently.
                         except Exception as e:
-                            _logger.error(f"Error fetching price using product.with_context().price_compute() for product {product.name} (Task: {task.name}): {e}. Using fallback list price {daily_rate_to_use}.")
+                            daily_rate_to_use = product.product_tmpl_id.list_price # Fallback
+                            _logger.error(f"Error fetching price using pricelist.get_product_price() for product {product.name} (Task: {task.name}): {e}. Using fallback list price {daily_rate_to_use}.")
                     else:
                         _logger.info(f"Storage product {product.name} (Task: {task.name}): No pricelist on invoice. Using product list price {daily_rate_to_use} as daily rate.")
 
@@ -577,19 +578,20 @@ class ProjectTask(models.Model):
                 daily_rate_to_use = product.product_tmpl_id.list_price # Default fallback
                 if invoice.pricelist_id:
                     try:
-                        price_context = {
-                            'pricelist': invoice.pricelist_id.id,
-                            'date': invoice.invoice_date,
-                            'uom': product.uom_id.id,
-                        }
-                        computed_price = product.with_context(price_context).price_compute('list_price')[product.id]
-                        if computed_price is not False:
-                            daily_rate_to_use = computed_price
-                            _logger.info(f"Storage product {product.name} (Task: {task.name}, Single Invoice): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name}")
-                        else:
-                             _logger.info(f"Storage product {product.name} (Task: {task.name}, Single Invoice): Pricelist {invoice.pricelist_id.name} did not return a specific rate (returned False), using fallback/default list price {daily_rate_to_use}.")
+                        partner_for_pricelist = invoice.partner_id.commercial_partner_id or invoice.partner_id
+                        quantity_for_price_rule = quantity if quantity > 0 else 1.0
+
+                        daily_rate_to_use = invoice.pricelist_id.get_product_price(
+                            product,
+                            quantity_for_price_rule,
+                            partner_for_pricelist,
+                            date=invoice.invoice_date,
+                            uom_id=product.uom_id.id
+                        )
+                        _logger.info(f"Storage product {product.name} (Task: {task.name}, Single Invoice): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name} method get_product_price().")
                     except Exception as e:
-                        _logger.error(f"Error fetching price using product.with_context().price_compute() for product {product.name} (Task: {task.name}, Single Invoice): {e}. Using fallback list price {daily_rate_to_use}.")
+                        daily_rate_to_use = product.product_tmpl_id.list_price # Fallback
+                        _logger.error(f"Error fetching price using pricelist.get_product_price() for product {product.name} (Task: {task.name}, Single Invoice): {e}. Using fallback list price {daily_rate_to_use}.")
                 else:
                     _logger.info(f"Storage product {product.name} (Task: {task.name}, Single Invoice): No pricelist on invoice. Using product list price {daily_rate_to_use} as daily rate.")
 
@@ -762,19 +764,20 @@ class ProjectTask(models.Model):
                         daily_rate_to_use = product.product_tmpl_id.list_price # Default fallback
                         if invoice.pricelist_id:
                             try:
-                                price_context = {
-                                    'pricelist': invoice.pricelist_id.id,
-                                    'date': invoice.invoice_date,
-                                    'uom': product.uom_id.id,
-                                }
-                                computed_price = product.with_context(price_context).price_compute('list_price')[product.id]
-                                if computed_price is not False:
-                                    daily_rate_to_use = computed_price
-                                    _logger.info(f"Storage product {product.name} (Task: {task_in_group.name}, Grouped Invoice): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name}")
-                                else:
-                                    _logger.info(f"Storage product {product.name} (Task: {task_in_group.name}, Grouped Invoice): Pricelist {invoice.pricelist_id.name} did not return a specific rate (returned False), using fallback/default list price {daily_rate_to_use}.")
+                                partner_for_pricelist = invoice.partner_id.commercial_partner_id or invoice.partner_id
+                                quantity_for_price_rule = quantity if quantity > 0 else 1.0
+
+                                daily_rate_to_use = invoice.pricelist_id.get_product_price(
+                                    product,
+                                    quantity_for_price_rule,
+                                    partner_for_pricelist,
+                                    date=invoice.invoice_date,
+                                    uom_id=product.uom_id.id
+                                )
+                                _logger.info(f"Storage product {product.name} (Task: {task_in_group.name}, Grouped Invoice): Fetched daily rate {daily_rate_to_use} using Pricelist: {invoice.pricelist_id.name} method get_product_price().")
                             except Exception as e:
-                                _logger.error(f"Error fetching price using product.with_context().price_compute() for product {product.name} (Task: {task_in_group.name}, Grouped Invoice): {e}. Using fallback list price {daily_rate_to_use}.")
+                                daily_rate_to_use = product.product_tmpl_id.list_price # Fallback
+                                _logger.error(f"Error fetching price using pricelist.get_product_price() for product {product.name} (Task: {task_in_group.name}, Grouped Invoice): {e}. Using fallback list price {daily_rate_to_use}.")
                         else:
                              _logger.info(f"Storage product {product.name} (Task: {task_in_group.name}, Grouped Invoice): No pricelist on invoice. Using product list price {daily_rate_to_use} as daily rate.")
 
@@ -821,7 +824,7 @@ class ProjectTask(models.Model):
             return True
 
         action_vals = {
-            'name': 'Generated Monthly Invoices',
+            'name': _('Generated Monthly Invoices'),
             'domain': [('id', 'in', created_invoice_ids)],
             'res_model': 'account.move',
             'type': 'ir.actions.act_window',
