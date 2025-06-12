@@ -64,6 +64,8 @@ class AccountMoveLineInherit(models.Model):
             partner = line.move_id.partner_id
             days = line.days_storage or 1
             
+            _logger.info(f"Calculando subtotal para producto {product.name} - días: {days}")
+            
             if product.product_tmpl_id.is_storage:
                 # Obtener precio de la lista de precios
                 pricelist = line.move_id.pricelist_id
@@ -82,8 +84,11 @@ class AccountMoveLineInherit(models.Model):
                 price_per_day = daily_rate * days
                 base_subtotal = original_quantity * price_per_day
 
+                _logger.info(f"Cálculos para almacenaje: daily_rate={daily_rate}, days={days}, price_per_day={price_per_day}, base_subtotal={base_subtotal}")
+
                 # Si el partner tiene no_minimum_pricing, el precio es days * precio lista
                 if partner and partner.no_minimum_pricing:
+                    _logger.info(f"Partner {partner.name} tiene no_minimum_pricing=True")
                     line.with_context(check_move_validity=False).write({
                         'price_unit': price_per_day,
                         'quantity': original_quantity
@@ -105,6 +110,7 @@ class AccountMoveLineInherit(models.Model):
 
                     # Aplicar lógica de precios mínimos
                     if effective_min_price > 0 and base_subtotal < effective_min_price:
+                        _logger.info(f"Aplicando precio mínimo efectivo: {effective_min_price}")
                         line.with_context(check_move_validity=False).write({
                             'price_unit': effective_min_price,
                             'quantity': 1.0

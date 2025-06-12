@@ -389,11 +389,13 @@ class ProjectTask(models.Model):
                         task_fecha_ingreso_date = task.fecha_ingreso.date()
                         # invoice.invoice_date is invoice_date in this scope
                         if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
-                            _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
-                            last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
-                            current_task_storage_days = (last_day_of_invoice_month_date - task_fecha_ingreso_date).days + 1
+                            # Si estamos en el mismo mes del ingreso, calcular días hasta la fecha actual, sin exceder los días del mes
+                            days_from_entry = (invoice_date - task_fecha_ingreso_date).days + 1
+                            current_task_storage_days = min(days_from_entry, days_in_invoice_full_month)
+                            _logger.info(f"Calculando días de almacenaje para tarea {task.name}: desde {task_fecha_ingreso_date} hasta {invoice_date}, resultado: {current_task_storage_days} días")
                         else: # Entry date is in a previous month/year
                             current_task_storage_days = days_in_invoice_full_month
+                            _logger.info(f"Usando mes completo para tarea {task.name}: {current_task_storage_days} días")
                     else:
                         # Default to full month if fecha_ingreso is somehow not set (though validated earlier)
                         current_task_storage_days = days_in_invoice_full_month
@@ -607,15 +609,17 @@ class ProjectTask(models.Model):
                 current_task_storage_days = 0
                 # invoice.invoice_date is invoice_date in this method's scope
                 _, days_in_invoice_full_month = calendar.monthrange(invoice_date.year, invoice_date.month)
-
+                
                 if task.fecha_ingreso:
                     task_fecha_ingreso_date = task.fecha_ingreso.date()
                     if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
-                        _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
-                        last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
-                        current_task_storage_days = (last_day_of_invoice_month_date - task_fecha_ingreso_date).days + 1
+                        # Si estamos en el mismo mes del ingreso, calcular días hasta la fecha actual, sin exceder los días del mes
+                        days_from_entry = (invoice_date - task_fecha_ingreso_date).days + 1
+                        current_task_storage_days = min(days_from_entry, days_in_invoice_full_month)
+                        _logger.info(f"Calculando días de almacenaje para tarea {task.name}: desde {task_fecha_ingreso_date} hasta {invoice_date}, resultado: {current_task_storage_days} días")
                     else: # Entry date is in a previous month/year
                         current_task_storage_days = days_in_invoice_full_month
+                        _logger.info(f"Usando mes completo para tarea {task.name}: {current_task_storage_days} días")
                 else:
                     current_task_storage_days = days_in_invoice_full_month
                     _logger.warning(f"Tarea {task.name} no tiene fecha_ingreso definida al calcular días de almacenaje para factura individual. Usando mes completo: {current_task_storage_days} días.")
@@ -794,11 +798,13 @@ class ProjectTask(models.Model):
                             task_fecha_ingreso_date = task_in_group.fecha_ingreso.date()
                             # invoice.invoice_date is invoice_date in this scope
                             if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
-                                _, num_days_in_invoice_month_for_task = calendar.monthrange(invoice_date.year, invoice_date.month)
-                                last_day_of_invoice_month_date = invoice_date.replace(day=num_days_in_invoice_month_for_task)
-                                current_task_storage_days = (last_day_of_invoice_month_date - task_fecha_ingreso_date).days + 1
+                                # Si estamos en el mismo mes del ingreso, calcular días hasta la fecha actual, sin exceder los días del mes
+                                days_from_entry = (invoice_date - task_fecha_ingreso_date).days + 1
+                                current_task_storage_days = min(days_from_entry, days_in_invoice_full_month)
+                                _logger.info(f"Calculando días de almacenaje para tarea {task_in_group.name}: desde {task_fecha_ingreso_date} hasta {invoice_date}, resultado: {current_task_storage_days} días")
                             else: # Entry date is in a previous month/year
                                 current_task_storage_days = days_in_invoice_full_month
+                                _logger.info(f"Usando mes completo para tarea {task_in_group.name}: {current_task_storage_days} días")
                         else:
                             current_task_storage_days = days_in_invoice_full_month
                             _logger.warning(f"Tarea {task_in_group.name} no tiene fecha_ingreso definida al calcular días de almacenaje para factura agrupada. Usando mes completo: {current_task_storage_days} días.")

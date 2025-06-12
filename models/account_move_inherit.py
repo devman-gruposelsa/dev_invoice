@@ -12,40 +12,45 @@ class AccountMoveInherit(models.Model):
     task_id = fields.Many2many('project.task', 
                              string='Carpeta de importación', 
                              compute='_compute_task_id',
-                             store=True)
+                             store=True,
+                             copy=False)  # Evitar copiar al duplicar facturas
 
     @api.depends('invoice_line_ids.task_id', 'invoice_line_ids.sale_id.task_ids', 'move_type')
     def _compute_task_id(self):
+        """Compute task_id field efficiently by minimizing database queries"""
+        # Pre-fetch related records to avoid N+1 queries
+        self.mapped('invoice_line_ids.task_id')
+        self.mapped('invoice_line_ids.sale_id.task_ids')
+        
+        # Process only relevant invoices in bulk
         for rec in self:
-            # Solo procesar facturas salientes y notas de crédito
             if rec.move_type not in ['out_invoice', 'out_refund']:
-                rec.task_id = [(5, 0, 0)]  # Limpiamos las relaciones
+                rec.task_id = [(5, 0, 0)]
                 continue
                 
-            task_ids = []
-            _logger.info(f"Procesando cálculo de task_id para {rec.move_type} {rec.id}")
+            # Get all task_ids in a single pass
+            task_ids = set()
+            sales_to_check = set()
             
             for line in rec.invoice_line_ids:
-                # Primero verificamos si la línea tiene una tarea directamente asociada
                 if line.task_id and line.task_id.project_id.importation:
-                    # Solo agregar tareas cuyo project_id tiene importation=True
-                    task_ids.append(line.task_id.id)
-                    _logger.info(f"Línea {line.id} asociada directamente a tarea {line.task_id.id}")
-                
-                # Si no tiene tarea directa pero tiene orden de venta, buscamos en las tareas de la orden
+                    task_ids.add(line.task_id.id)
                 elif line.sale_id:
-                    task_ids.extend(
-                        task.id 
-                        for task in line.sale_id.task_ids 
-                        if task.project_id.importation
-                    )
-                    if task_ids:
-                        _logger.info(f"Orden de venta {line.sale_id.id} asociada a tareas: {task_ids}")
+                    sales_to_check.add(line.sale_id.id)
             
-            # Eliminamos duplicados y asignamos las tareas
-            rec.task_id = [(6, 0, list(set(task_ids)))]
-            if task_ids:
-                _logger.info(f"Tareas finales para {rec.move_type} {rec.id}: {list(set(task_ids))}")
+            # If we have sales orders, get their tasks efficiently
+            if sales_to_check:
+                sale_tasks = self.env['sale.order'].browse(list(sales_to_check)).mapped('task_ids').filtered(
+                    lambda t: t.project_id.importation
+                )
+                task_ids.update(sale_tasks.ids)
+            
+            # Update tasks in one operation
+            rec.task_id = [(6, 0, list(task_ids))]
+        
+        # Limpiar relaciones para otros tipos de movimientos
+        for rec in self.filtered(lambda m: m.move_type not in ['out_invoice', 'out_refund']):
+            rec.task_id = [(5, 0, 0)]
 
     @api.model
     def create(self, vals):
@@ -109,14 +114,19 @@ class AccountMoveInherit(models.Model):
     @api.model
     def _cron_update_task_relations(self):
         """
-        Método para ser llamado por el cron que actualiza las relaciones entre facturas y tareas
+        Método para ser llamado por el cron que actualiza las relaciones entre facturas y tareas.
+        Optimizado para reducir la carga de la base de datos.
         """
         _logger.info("Iniciando actualización programada de relaciones de facturas con tareas")
         
         yesterday = fields.Datetime.now() - timedelta(days=1)
-        domain = [('write_date', '>=', yesterday)]
+        # Primero obtenemos las facturas modificadas con una búsqueda simple
+        domain = [
+            ('write_date', '>=', yesterday),
+            ('move_type', 'in', ['out_invoice', 'out_refund'])
+        ]
         # Limit the number of records per cron run and order
-        moves = self.search(domain, limit=1000, order='write_date desc')
+        moves = self.search(domain, limit=500, order='write_date desc')
         _logger.info(f"Cron job _cron_update_task_relations processing {len(moves)} invoices modified since {yesterday}.")
 
         count = 0
