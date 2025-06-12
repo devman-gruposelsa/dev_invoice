@@ -233,6 +233,62 @@ class ProjectTask(models.Model):
         _logger.info("Generando facturas de egreso...")
         self._create_invoice('outcome_invoice_pack')
 
+    def _get_storage_products_domain(self, is_imo):
+        """Helper method to get products domain based on IMO status"""
+        base_domain = [('stock_invoice_pack', '=', True)]
+        if is_imo:
+            # Si es IMO, traer productos IMO y generales
+            imo_domain = ['|', ('is_general', '=', True), ('is_imo', '=', True)]
+        else:
+            # Si no es IMO, traer todos excepto los que son solo IMO
+            imo_domain = ['|', ('is_general', '=', True), '&', ('is_general', '=', False), ('is_imo', '=', False)]
+        return base_domain + imo_domain
+
+    def _get_minimum_price(self, partner, product, calculated_price):
+        """Helper method to determine minimum price based on partner and product configuration"""
+        # Buscar si existe precio especial para el cliente
+        special_minimum = self.env['partner.product.special.minimum'].search([
+            ('partner_id', '=', partner.id),
+            ('product_id', '=', product.id)
+        ], limit=1)
+
+        if special_minimum:
+            minimum_price = special_minimum.minimum_price
+        else:
+            minimum_price = product.minimum_price or 0.0
+
+        # Si el partner tiene no_minimum_pricing, ignorar mínimos
+        if partner.no_minimum_pricing:
+            return calculated_price
+
+        return max(calculated_price, minimum_price)
+
+    def _prepare_storage_line_values(self, invoice, product, task, quantity, days_storage, daily_rate):
+        """Helper method to prepare storage line values with minimum price logic"""
+        calculated_total = quantity * days_storage * daily_rate
+        minimum_price = self._get_minimum_price(invoice.partner_id, product, calculated_total)
+
+        # Si el total calculado es menor que el mínimo y el partner no tiene no_minimum_pricing
+        if calculated_total < minimum_price and not invoice.partner_id.no_minimum_pricing:
+            quantity = 1
+            price_unit = minimum_price
+        else:
+            price_unit = daily_rate * days_storage
+
+        name = f"{product.name} - {task.name} - {task.total_m3} m3 - {days_storage} días"
+
+        return {
+            'move_id': invoice.id,
+            'product_id': product.id,
+            'quantity': quantity,
+            'days_storage': days_storage,
+            'calculate_custom': True,
+            'price_unit': price_unit,
+            'name': name,
+            'account_id': product.categ_id.property_account_income_categ_id.id,
+            'task_id': task.id,
+        }
+
     def action_create_storage_invoice(self):
         account_move_obj = self.env['account.move']
         account_move_line_obj = self.env['account.move.line']
@@ -243,11 +299,7 @@ class ProjectTask(models.Model):
                 raise ValidationError(f"Este tránsito no se puede facturar porque está en 'Egreso Completo'. (Tarea: {task.name})")
 
             # Buscar productos con el paquete de facturación de almacenamiento
-            base_domain = [('stock_invoice_pack', '=', True)]
-            imo_general_domain = ['|', ('product_tmpl_id.is_general', '=', True), '&', ('product_tmpl_id.is_general', '=', False), ('is_imo', '=', task.is_imo)]
-            domain = base_domain + imo_general_domain
-
-            products = self.env['product.product'].search(domain)
+            products = self.env['product.product'].search(self._get_storage_products_domain(task.is_imo))
             if not products:
                 raise ValidationError('No hay productos configurados para facturación de almacenamiento.')
 
@@ -483,10 +535,7 @@ class ProjectTask(models.Model):
             raise ValidationError(f"Este tránsito no se puede facturar porque está en 'Egreso Completo'. (Tarea: {task.name})")
 
         # Buscar productos con el paquete de facturación de almacenamiento
-        base_domain = [('stock_invoice_pack', '=', True)]
-        imo_general_domain = ['|', ('product_tmpl_id.is_general', '=', True), '&', ('product_tmpl_id.is_general', '=', False), ('is_imo', '=', task.is_imo)]
-        domain = base_domain + imo_general_domain
-        products = self.env['product.product'].search(domain)
+        products = self.env['product.product'].search(self._get_storage_products_domain(task.is_imo))
         if not products:
             raise ValidationError(f"No hay productos configurados para facturación de almacenamiento para la tarea {task.name}.")
 
@@ -629,7 +678,6 @@ class ProjectTask(models.Model):
 
         return invoice
 
-    # echo ok: sumarizar fob total en le producto seguros (revisar config producto) de todos los transitos que esten unificados en la factura. En el almacenamiento mensual desde tareas revisar que se haya implementado la linea del producto seguro (fob)
     def action_generate_monthly_invoices(self):
         # Agrupar tareas por cliente y por IMO
         grouped_tasks = {}
@@ -703,10 +751,7 @@ class ProjectTask(models.Model):
                 created_invoice_ids.append(invoice.id)
 
             # Obtener productos según IMO
-            base_domain = [('stock_invoice_pack', '=', True)]
-            imo_general_domain = ['|', ('product_tmpl_id.is_general', '=', True), '&', ('product_tmpl_id.is_general', '=', False), ('is_imo', '=', is_imo)]
-            domain = base_domain + imo_general_domain
-            products = self.env['product.product'].search(domain)
+            products = self.env['product.product'].search(self._get_storage_products_domain(is_imo))
 
             # Obtener tasa de cambio USD
             usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
