@@ -86,9 +86,9 @@ class AccountMoveLineInherit(models.Model):
 
                 _logger.info(f"Cálculos para almacenaje: daily_rate={daily_rate}, days={days}, price_per_day={price_per_day}, base_subtotal={base_subtotal}")
 
-                # Si el partner tiene no_minimum_pricing, el precio es days * precio lista
+                # Si el partner tiene no_minimum_pricing o base_subtotal supera el mínimo, usar precio por día
                 if partner and partner.no_minimum_pricing:
-                    _logger.info(f"Partner {partner.name} tiene no_minimum_pricing=True")
+                    _logger.info(f"Partner {partner.name} tiene no_minimum_pricing=True - usando precio por día")
                     line.with_context(check_move_validity=False).write({
                         'price_unit': price_per_day,
                         'quantity': original_quantity
@@ -105,10 +105,13 @@ class AccountMoveLineInherit(models.Model):
                     # Determinar el precio mínimo efectivo
                     if special_min_rule and special_min_rule.special_min_price > 0:
                         effective_min_price = special_min_rule.special_min_price
+                        _logger.info(f"Regla especial encontrada - precio mínimo: {effective_min_price}")
                     else:
                         effective_min_price = product.product_tmpl_id.min_price or 0.0
+                        _logger.info(f"Usando precio mínimo del producto: {effective_min_price}")
 
                     # Aplicar lógica de precios mínimos
+                    _logger.info(f"Comparando base_subtotal ({base_subtotal}) con effective_min_price ({effective_min_price})")
                     if effective_min_price > 0 and base_subtotal < effective_min_price:
                         _logger.info(f"Aplicando precio mínimo efectivo: {effective_min_price}")
                         line.with_context(check_move_validity=False).write({
@@ -117,6 +120,7 @@ class AccountMoveLineInherit(models.Model):
                         })
                         subtotal = effective_min_price
                     else:
+                        _logger.info(f"El subtotal base ({base_subtotal}) supera el mínimo - usando precio por día")
                         line.with_context(check_move_validity=False).write({
                             'price_unit': price_per_day,
                             'quantity': original_quantity
@@ -159,32 +163,39 @@ class AccountMoveLineInherit(models.Model):
                 continue
 
             product = line.product_id
+            if not product.product_tmpl_id.is_storage:
+                continue
+
             partner = line.move_id.partner_id
+            days = line.days_storage or 1
+            
+            # Obtener precio de la lista de precios
+            pricelist = line.move_id.pricelist_id
+            if pricelist:
+                daily_rate = pricelist._get_product_price(
+                    product,
+                    quantity=1.0,
+                    uom=product.uom_id,
+                    date=line.move_id.date
+                )
+            else:
+                daily_rate = product.list_price
+
+            price_per_day = daily_rate * days
+            base_subtotal = line.quantity * price_per_day
+
+            if partner and partner.no_minimum_pricing:
+                line.price_unit = price_per_day
+                return
+
+            # Determinar precio mínimo
             effective_min_price = self._get_effective_minimum_price(product, partner)
 
-            if product.product_tmpl_id.is_storage:
-                base_subtotal = line.quantity * (line.days_storage or 1) * line.price_unit
-                
-                if effective_min_price > 0 and base_subtotal < effective_min_price:
-                    line.with_context(check_move_validity=False).write({
-                        'quantity': 1,
-                        'price_unit': effective_min_price
-                    })
-
-            elif product.product_tmpl_id.fob_total:
-                usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
-                rate = 1.0
-                if usd_currency:
-                    rate_data = usd_currency._get_rates(self.env.company, fields.Date.context_today(self))
-                    rate = 1 / rate_data.get(usd_currency.id, 1.0)
-
-                base_subtotal = (line.fob_total or 0.0) * rate * 0.001
-                
-                if effective_min_price > 0 and base_subtotal < effective_min_price:
-                    line.with_context(check_move_validity=False).write({
-                        'quantity': 1,
-                        'price_unit': effective_min_price
-                    })
+            # Si el subtotal es mayor que el precio mínimo, usar precio por día
+            if effective_min_price <= 0 or base_subtotal >= effective_min_price:
+                line.price_unit = price_per_day
+            else:
+                line.price_unit = effective_min_price
 
     @api.depends('quantity', 'price_unit', 'tax_ids', 'currency_id', 'product_id', 'days_storage', 'calculate_custom')
     def _compute_price_subtotal(self):
@@ -301,66 +312,9 @@ class AccountMoveLineInherit(models.Model):
 
     def write(self, vals):
         res = super().write(vals)
-        if any(field in vals for field in ['calculate_custom', 'quantity', 'price_unit', 'days_storage']):
+        # Solo recalcular si se modifican campos relevantes y no es una actualización del price_unit
+        if any(field in vals for field in ['calculate_custom', 'quantity', 'days_storage']) and 'price_unit' not in vals:
             for line in self:
-                if line.calculate_custom and not line.move_id.partner_id.no_minimum_pricing:
-                    # Solo procesar lógica de precio mínimo si no tiene no_minimum_pricing
-                    price = line._get_computed_price()
-                    update_vals = {}
-                    
-                    if price != line.price_unit:
-                        update_vals['price_unit'] = price
-                    
-                    if line.product_id.product_tmpl_id.is_storage:
-                        # Para productos de almacenamiento, verificar el subtotal
-                        daily_rate = price / (line.days_storage or 1)
-                        base_subtotal = line.quantity * (line.days_storage or 1) * daily_rate
-
-                        # Buscar regla especial para el partner
-                        special_min_rule = self.env['partner.product.special.minimum'].search([
-                            ('partner_id', '=', line.move_id.partner_id.id),
-                            ('product_id', '=', line.product_id.id),
-                            ('company_id', '=', line.company_id.id or self.env.company.id)
-                        ], limit=1)
-
-                        if special_min_rule and special_min_rule.special_min_price > 0:
-                            min_price = special_min_rule.special_min_price
-                        else:
-                            min_price = line.product_id.product_tmpl_id.min_price or 0.0
-
-                        if min_price and base_subtotal < min_price:
-                            update_vals.update({
-                                'quantity': 1,
-                                'price_unit': min_price
-                            })
-
-                    elif line.product_id.product_tmpl_id.fob_total:
-                        # Para productos FOB
-                        usd_currency = self.env['res.currency'].search([('name', '=', 'USD')], limit=1)
-                        rate = 1.0
-                        if usd_currency:
-                            rate_data = usd_currency._get_rates(self.env.company, fields.Date.context_today(self))
-                            rate = 1 / rate_data.get(usd_currency.id, 1.0)
-                        base_subtotal = (line.fob_total or 0.0) * rate * 0.001
-
-                        # Buscar regla especial para el partner
-                        special_min_rule = self.env['partner.product.special.minimum'].search([
-                            ('partner_id', '=', line.move_id.partner_id.id),
-                            ('product_id', '=', line.product_id.id),
-                            ('company_id', '=', line.company_id.id or self.env.company.id)
-                        ], limit=1)
-
-                        if special_min_rule and special_min_rule.special_min_price > 0:
-                            min_price = special_min_rule.special_min_price
-                        else:
-                            min_price = line.product_id.product_tmpl_id.min_price or 0.0
-
-                        if min_price and base_subtotal < min_price:
-                            update_vals.update({
-                                'quantity': 1,
-                                'price_unit': min_price
-                            })
-
-                    if update_vals:
-                        super(AccountMoveLineInherit, line.with_context(check_move_validity=False)).write(update_vals)
+                if line.calculate_custom and line.product_id.product_tmpl_id.is_storage:
+                    self._compute_price_unit()
         return res
