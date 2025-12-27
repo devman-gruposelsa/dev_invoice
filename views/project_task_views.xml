@@ -11,15 +11,20 @@
                 <button name="action_create_income_invoice"
                         string="Factura de ingreso"
                         type="object"
-                        class="btn-primary"/>
+                        class="btn-primary"
+                        attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                <!-- DESHABILITADO TEMPORALMENTE
                 <button name="action_create_outcome_invoice"
                         string="Factura de egreso"
                         type="object"
-                        class="btn-primary"/>
+                        class="btn-primary"
+                        attrs="{'invisible': [('importation_task', '=', False)]}"/>
+                -->
                 <button name="action_create_storage_invoice"
                         string="Factura de almacenamiento mensual"
                         type="object"
-                        class="btn-primary"/>
+                        class="btn-primary"
+                        attrs="{'invisible': [('importation_task', '=', False)]}"/>
             </xpath>
           </field>
       </record>
@@ -44,6 +49,7 @@
                   <!--</div>-->
               </div>
               <field name="date_next_billing"/>
+              <field name="auto_monthly_invoice"/>
             </xpath>
         </field>
       </record>

@@ -21,6 +21,12 @@ class ProjectTask(models.Model):
 
     date_next_billing = fields.Date(string="Fecha de proxima facturación mensual", help="Corresponde a la fecha en la cual desea que se realice la facturación mensual, la misma aumentara en dias")
     
+    auto_monthly_invoice = fields.Boolean(
+        string="Facturación mensual automática",
+        default=True,
+        help="Si está marcado, esta tarea será incluida en la facturación mensual automática cuando llegue la fecha de próxima facturación."
+    )
+    
     days_invoiced = fields.Integer(string="Días de Almacenamiento Facturado", compute="_compute_days_storage_invoiced", store=True, help="Días de almacenamiento facturados en las líneas de factura.", tracking=True)
 
     days_to_invoiced = fields.Integer(string="Días de Almacenamiento a Facturar", compute="_compute_days_storage_to_invoiced", store=True, help="Días de almacenamiento a facturar.")
@@ -30,13 +36,39 @@ class ProjectTask(models.Model):
     move_lines_ids = fields.Many2many('account.move.line', compute="_compute_move_line_ids", string="Líneas de Factura", help="Líneas de factura asociadas a esta tarea.", store=False)
 
 
-    @api.depends('name', 'invoice_ids_filtered')
     def _compute_move_line_ids(self):
+        """Versión optimizada del cálculo de líneas de factura - solo se ejecuta cuando se accede al campo"""
+        if not self:
+            return
+        
+        # Obtener IDs válidos (excluir NewId)
+        valid_ids = [t.id for t in self if t.id and not isinstance(t.id, models.NewId)]
+        
+        if not valid_ids:
+            for task in self:
+                task.move_lines_ids = self.env['account.move.line']
+            return
+        
+        # Una sola consulta para todas las tareas
+        move_lines = self.env['account.move.line'].search([
+            ('task_id', 'in', valid_ids),
+        ])
+        
+        # Agrupar por task_id
+        task_lines_map = {}
+        for line in move_lines:
+            task_id = line.task_id.id
+            if task_id not in task_lines_map:
+                task_lines_map[task_id] = []
+            task_lines_map[task_id].append(line.id)
+        
+        # Asignar a cada tarea
         for task in self:
-            move_lines = self.env['account.move.line'].search([
-                ('task_id', '=', task.id),  # Filtra por el id de la tarea
-            ])
-            task.move_lines_ids = move_lines
+            if not task.id or isinstance(task.id, models.NewId):
+                task.move_lines_ids = self.env['account.move.line']
+            else:
+                line_ids = task_lines_map.get(task.id, [])
+                task.move_lines_ids = self.env['account.move.line'].browse(line_ids)
 
     def costo_total_transito(self):
         for rec in self:
@@ -45,33 +77,62 @@ class ProjectTask(models.Model):
     @api.depends('move_lines_ids')
     def _compute_transit_total_cost(self):
         for rec in self:
-            _logger.info(f"Calculando costo total de tránsito para tarea: {rec.id}")
+            # Solo procesar tareas de proyectos de importación
+            if not rec.project_id or not getattr(rec.project_id, 'importation', False):
+                rec.transit_total_cost = 0.0
+                continue
+            
+            # Evitar error con NewId
+            if isinstance(rec.id, models.NewId):
+                rec.transit_total_cost = 0.0
+                continue
             
             # Búsqueda optimizada: incluimos facturas y notas de crédito
             moves = self.env['account.move'].search([
                 ('task_id', 'in', [rec.id]),
-                ('move_type', 'in', ['out_invoice', 'out_refund']),  # Facturas y notas de crédito
+                ('move_type', 'in', ['out_invoice', 'out_refund']),
                 ('state', 'not in', ['draft', 'cancel'])
             ])
             
             if moves:
-                # Para notas de crédito el amount es negativo, se suma automáticamente
                 rec.transit_total_cost = sum(moves.mapped('amount_untaxed_signed'))
-                _logger.info(
-                    f"Tarea: {rec.id} | "
-                    f"Documentos encontrados: {len(moves)} | "
-                    f"Total: {rec.transit_total_cost} | "
-                    f"IDs: {moves.ids}"
-                )
             else:
                 rec.transit_total_cost = 0.0
-                _logger.info(f"Tarea: {rec.id} | No se encontraron documentos relacionados")
     
-    @api.depends('move_lines_ids.days_storage', 'move_lines_ids.move_id.state', 'days_storage')
+    @api.depends('days_storage')
     def _compute_days_storage_invoiced(self):
+        """Calcula días facturados usando SQL directo para máxima performance"""
+        if not self:
+            return
+            
+        # Obtener IDs válidos
+        valid_ids = [t.id for t in self if t.id and not isinstance(t.id, models.NewId)]
+        
+        if not valid_ids:
+            for task in self:
+                task.days_invoiced = 0
+            return
+        
+        # Consulta SQL directa - mucho más eficiente que ORM
+        self.env.cr.execute("""
+            SELECT 
+                aml.task_id,
+                COALESCE(SUM(aml.days_storage), 0) as total_days
+            FROM account_move_line aml
+            JOIN account_move am ON am.id = aml.move_id
+            WHERE aml.task_id IN %s
+              AND am.state = 'posted'
+              AND aml.days_storage IS NOT NULL
+            GROUP BY aml.task_id
+        """, (tuple(valid_ids),))
+        
+        results = {row[0]: row[1] for row in self.env.cr.fetchall()}
+        
         for task in self:
-            posted_lines = task.move_lines_ids.filtered(lambda line: line.move_id.state == 'posted')
-            task.days_invoiced = sum(posted_lines.mapped('days_storage') or [0])
+            if not task.id or isinstance(task.id, models.NewId):
+                task.days_invoiced = 0
+            else:
+                task.days_invoiced = int(results.get(task.id, 0))
 
     @api.depends('days_storage', 'days_invoiced')
     def _compute_days_storage_to_invoiced(self):
@@ -331,6 +392,7 @@ class ProjectTask(models.Model):
                 'invoice_origin': task.name,
                 'invoice_date': invoice_date,
                 'narration': narration,  # Agregar la narración
+                'is_monthly_invoice': True,  # Marcar como factura mensual
             })
 
             _logger.info(f"Factura creada con ID: {invoice.id} para la tarea {task.name} (ID: {task.id})")
@@ -389,10 +451,9 @@ class ProjectTask(models.Model):
                         task_fecha_ingreso_date = task.fecha_ingreso.date()
                         # invoice.invoice_date is invoice_date in this scope
                         if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
-                            # Si estamos en el mismo mes del ingreso, calcular días hasta la fecha actual, sin exceder los días del mes
-                            days_from_entry = (invoice_date - task_fecha_ingreso_date).days + 1
-                            current_task_storage_days = min(days_from_entry, days_in_invoice_full_month)
-                            _logger.info(f"Calculando días de almacenaje para tarea {task.name}: desde {task_fecha_ingreso_date} hasta {invoice_date}, resultado: {current_task_storage_days} días")
+                            # Si estamos en el mismo mes del ingreso, calcular días desde ingreso hasta fin de mes (incluyendo día de ingreso)
+                            current_task_storage_days = days_in_invoice_full_month - task_fecha_ingreso_date.day + 1
+                            _logger.info(f"Calculando días de almacenaje para tarea {task.name}: desde {task_fecha_ingreso_date} hasta fin de mes ({days_in_invoice_full_month}), resultado: {current_task_storage_days} días")
                         else: # Entry date is in a previous month/year
                             current_task_storage_days = days_in_invoice_full_month
                             _logger.info(f"Usando mes completo para tarea {task.name}: {current_task_storage_days} días")
@@ -569,6 +630,7 @@ class ProjectTask(models.Model):
             'invoice_origin': task.name,
             'invoice_date': invoice_date,
             'narration': narration,
+            'is_monthly_invoice': True,  # Marcar como factura mensual
         })
 
         _logger.info(f"Factura creada con ID: {invoice.id} para la tarea {task.name} (ID: {task.id})")
@@ -613,10 +675,9 @@ class ProjectTask(models.Model):
                 if task.fecha_ingreso:
                     task_fecha_ingreso_date = task.fecha_ingreso.date()
                     if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
-                        # Si estamos en el mismo mes del ingreso, calcular días hasta la fecha actual, sin exceder los días del mes
-                        days_from_entry = (invoice_date - task_fecha_ingreso_date).days + 1
-                        current_task_storage_days = min(days_from_entry, days_in_invoice_full_month)
-                        _logger.info(f"Calculando días de almacenaje para tarea {task.name}: desde {task_fecha_ingreso_date} hasta {invoice_date}, resultado: {current_task_storage_days} días")
+                        # Si estamos en el mismo mes del ingreso, calcular días desde ingreso hasta fin de mes (incluyendo día de ingreso)
+                        current_task_storage_days = days_in_invoice_full_month - task_fecha_ingreso_date.day + 1
+                        _logger.info(f"Calculando días de almacenaje para tarea {task.name}: desde {task_fecha_ingreso_date} hasta fin de mes ({days_in_invoice_full_month}), resultado: {current_task_storage_days} días")
                     else: # Entry date is in a previous month/year
                         current_task_storage_days = days_in_invoice_full_month
                         _logger.info(f"Usando mes completo para tarea {task.name}: {current_task_storage_days} días")
@@ -750,6 +811,7 @@ class ProjectTask(models.Model):
                 'invoice_origin': ', '.join([task.name for task in tasks]),
                 'invoice_date': invoice_date,
                 'narration': narration,
+                'is_monthly_invoice': True,  # Marcar como factura mensual
             })
             if invoice: # If grouped invoice was created
                 created_invoice_ids.append(invoice.id)
@@ -798,10 +860,9 @@ class ProjectTask(models.Model):
                             task_fecha_ingreso_date = task_in_group.fecha_ingreso.date()
                             # invoice.invoice_date is invoice_date in this scope
                             if invoice_date.year == task_fecha_ingreso_date.year and invoice_date.month == task_fecha_ingreso_date.month:
-                                # Si estamos en el mismo mes del ingreso, calcular días hasta la fecha actual, sin exceder los días del mes
-                                days_from_entry = (invoice_date - task_fecha_ingreso_date).days + 1
-                                current_task_storage_days = min(days_from_entry, days_in_invoice_full_month)
-                                _logger.info(f"Calculando días de almacenaje para tarea {task_in_group.name}: desde {task_fecha_ingreso_date} hasta {invoice_date}, resultado: {current_task_storage_days} días")
+                                # Si estamos en el mismo mes del ingreso, calcular días desde ingreso hasta fin de mes (incluyendo día de ingreso)
+                                current_task_storage_days = days_in_invoice_full_month - task_fecha_ingreso_date.day + 1
+                                _logger.info(f"Calculando días de almacenaje para tarea {task_in_group.name}: desde {task_fecha_ingreso_date} hasta fin de mes ({days_in_invoice_full_month}), resultado: {current_task_storage_days} días")
                             else: # Entry date is in a previous month/year
                                 current_task_storage_days = days_in_invoice_full_month
                                 _logger.info(f"Usando mes completo para tarea {task_in_group.name}: {current_task_storage_days} días")
@@ -846,19 +907,24 @@ class ProjectTask(models.Model):
                             'task_id': task_in_group.id,
                         })
                 else:
-                    # Productos normales
-                    for task in tasks:
-                        name = f"{product.name} - {task.name}"
-                        self.env['account.move.line'].create({
-                            'move_id': invoice.id,
-                            'product_id': product.id,
-                            'quantity': 1,
-                            'calculate_custom': False,
-                            'price_unit': product.lst_price,
-                            'name': name,
-                            'account_id': product.categ_id.property_account_income_categ_id.id,
-                            'task_id': task.id,
-                        })
+                    # Productos normales - consolidar en una sola línea para factura agrupada
+                    task_names = ', '.join([task.name for task in tasks])
+                    # Si hay muchas tareas, abreviar el nombre
+                    if len(tasks) <= 3:
+                        name = f"{product.name} - {task_names}"
+                    else:
+                        name = f"{product.name} - {len(tasks)} tránsitos"
+                    
+                    self.env['account.move.line'].create({
+                        'move_id': invoice.id,
+                        'product_id': product.id,
+                        'quantity': 1,  # Cantidad 1, no por tarea
+                        'calculate_custom': False,
+                        'price_unit': product.lst_price,
+                        'name': name,
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        # No task_id específico ya que es una línea consolidada para múltiples tareas
+                    })
 
             try:
                 invoice.button_update_prices_from_pricelist()
@@ -896,5 +962,151 @@ class ProjectTask(models.Model):
 
         _logger.info(f"Action to display generated invoices: {action_vals}")
         return action_vals
+
+    def _cron_generate_monthly_invoices(self):
+        """
+        Acción planificada diaria para generar facturas mensuales automáticamente.
+        
+        Procesa tareas donde:
+        - auto_monthly_invoice = True
+        - date_next_billing <= hoy (o está vacío para primera factura)
+        - egreso_completo = False
+        - project_id.importation = True
+        
+        Llama a action_generate_monthly_invoices() que contiene toda la lógica de negocio.
+        Registra la ejecución en monthly.invoice.log
+        """
+        today = fields.Date.today()
+        log_obj = self.env['monthly.invoice.log']
+        
+        # Buscar tareas elegibles para facturación automática
+        tasks = self.search([
+            ('auto_monthly_invoice', '=', True),
+            ('egreso_completo', '=', False),
+            ('project_id.importation', '=', True),
+            '|',
+            ('date_next_billing', '<=', today),
+            ('date_next_billing', '=', False),  # Primera factura (sin fecha aún)
+        ])
+        
+        _logger.info(f"[CRON-MONTHLY] ========== INICIO FACTURACIÓN MENSUAL AUTOMÁTICA ==========")
+        _logger.info(f"[CRON-MONTHLY] Fecha de ejecución: {today}")
+        _logger.info(f"[CRON-MONTHLY] Encontradas {len(tasks)} tareas para facturar")
+        
+        if not tasks:
+            _logger.info(f"[CRON-MONTHLY] No hay tareas pendientes de facturación mensual")
+            # Crear log indicando que no hubo tareas
+            log_obj.create({
+                'tasks_found': 0,
+                'tasks_processed': 0,
+                'invoices_created': 0,
+                'state': 'success',
+                'notes': 'No se encontraron tareas pendientes de facturación mensual.',
+            })
+            _logger.info(f"[CRON-MONTHLY] ========== FIN FACTURACIÓN MENSUAL AUTOMÁTICA ==========")
+            return True
+        
+        # Log detallado de tareas a facturar
+        task_list_notes = []
+        _logger.info(f"[CRON-MONTHLY] Listado de tránsitos a facturar:")
+        for task in tasks:
+            task_info = f"- {task.name} | Partner: {task.partner_id.name} | Próx. Facturación: {task.date_next_billing or 'Sin fecha'}"
+            _logger.info(f"[CRON-MONTHLY]   {task_info}")
+            task_list_notes.append(task_info)
+        
+        # Preparar log
+        log_values = {
+            'tasks_found': len(tasks),
+            'task_ids': [(6, 0, tasks.ids)],
+        }
+        
+        try:
+            # Obtener facturas antes de ejecutar para saber cuántas se crearon
+            invoices_before = self.env['account.move'].search([
+                ('is_monthly_invoice', '=', True),
+                ('state', '=', 'draft'),
+            ])
+            invoices_before_ids = set(invoices_before.ids)
+            
+            # Usar la misma lógica que la acción manual
+            tasks.action_generate_monthly_invoices()
+            
+            # Obtener facturas después para identificar las nuevas
+            invoices_after = self.env['account.move'].search([
+                ('is_monthly_invoice', '=', True),
+                ('state', '=', 'draft'),
+            ])
+            new_invoice_ids = set(invoices_after.ids) - invoices_before_ids
+            new_invoices = self.env['account.move'].browse(list(new_invoice_ids))
+            
+            _logger.info(f"[CRON-MONTHLY] Facturación mensual completada exitosamente")
+            _logger.info(f"[CRON-MONTHLY] Tránsitos facturados: {len(tasks)}")
+            _logger.info(f"[CRON-MONTHLY] Facturas creadas: {len(new_invoices)}")
+            
+            # Actualizar log values
+            log_values.update({
+                'tasks_processed': len(tasks),
+                'invoices_created': len(new_invoices),
+                'invoice_ids': [(6, 0, list(new_invoice_ids))],
+                'state': 'success',
+                'notes': f"Facturación mensual completada exitosamente.\n\nTránsitos facturados:\n" + "\n".join(task_list_notes),
+            })
+            
+            # Notificar a seguidores internos de cada tarea
+            self._notify_internal_followers_monthly_invoice(tasks)
+            
+        except Exception as e:
+            _logger.error(f"[CRON-MONTHLY] Error al generar facturas mensuales: {str(e)}")
+            log_values.update({
+                'tasks_processed': 0,
+                'invoices_created': 0,
+                'state': 'error',
+                'error_message': str(e),
+                'notes': f"Error durante la facturación mensual.\n\nTránsitos que se intentaron facturar:\n" + "\n".join(task_list_notes),
+            })
+            # Crear log de error
+            log_obj.create(log_values)
+            raise
+        
+        # Crear log de éxito
+        log_obj.create(log_values)
+        
+        _logger.info(f"[CRON-MONTHLY] ========== FIN FACTURACIÓN MENSUAL AUTOMÁTICA ==========")
+        return True
+
+    def _notify_internal_followers_monthly_invoice(self, tasks):
+        """
+        Envía notificación a los seguidores internos de cada tarea
+        informando que se generó la factura mensual automáticamente.
+        """
+        for task in tasks:
+            try:
+                # Obtener seguidores que sean usuarios internos
+                internal_partners = []
+                for follower in task.message_follower_ids:
+                    partner = follower.partner_id
+                    # Verificar si el partner tiene usuario interno asociado
+                    user = self.env['res.users'].sudo().search([
+                        ('partner_id', '=', partner.id),
+                        ('active', '=', True),
+                        ('share', '=', False),  # share=False significa usuario interno
+                    ], limit=1)
+                    if user:
+                        internal_partners.append(partner.id)
+                
+                if internal_partners:
+                    # Crear mensaje en el chatter de la tarea
+                    task.message_post(
+                        body=f"<p>📋 <b>Facturación Mensual Automática</b></p>"
+                             f"<p>Se ha generado automáticamente la factura mensual para este tránsito.</p>"
+                             f"<p>Fecha de ejecución: {fields.Date.today()}</p>"
+                             f"<p>Por favor, revise la factura en borrador.</p>",
+                        message_type='notification',
+                        subtype_xmlid='mail.mt_comment',
+                        partner_ids=internal_partners,
+                    )
+                    _logger.info(f"[CRON-MONTHLY] Notificación enviada a {len(internal_partners)} seguidores internos de tarea {task.name}")
+            except Exception as e:
+                _logger.warning(f"[CRON-MONTHLY] Error al notificar seguidores de tarea {task.name}: {str(e)}")
 
 

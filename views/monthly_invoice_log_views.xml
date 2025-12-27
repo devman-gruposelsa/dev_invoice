@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Tree View -->
+    <record id="monthly_invoice_log_tree_view" model="ir.ui.view">
+        <field name="name">monthly.invoice.log.tree</field>
+        <field name="model">monthly.invoice.log</field>
+        <field name="arch" type="xml">
+            <tree string="Log de Facturación Mensual">
+                <field name="execution_date"/>
+                <field name="user_id"/>
+                <field name="tasks_found"/>
+                <field name="tasks_processed"/>
+                <field name="invoices_created"/>
+                <field name="state" widget="badge" decoration-success="state == 'success'" decoration-warning="state == 'partial'" decoration-danger="state == 'error'"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="monthly_invoice_log_form_view" model="ir.ui.view">
+        <field name="name">monthly.invoice.log.form</field>
+        <field name="model">monthly.invoice.log</field>
+        <field name="arch" type="xml">
+            <form string="Log de Facturación Mensual" create="false" edit="false">
+                <header>
+                    <field name="state" widget="statusbar" statusbar_visible="success,partial,error"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Información General">
+                            <field name="execution_date"/>
+                            <field name="user_id"/>
+                        </group>
+                        <group string="Resultados">
+                            <field name="tasks_found"/>
+                            <field name="tasks_processed"/>
+                            <field name="invoices_created"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Resumen" name="summary">
+                            <field name="notes" readonly="1"/>
+                        </page>
+                        <page string="Tareas Facturadas" name="tasks">
+                            <field name="task_ids" readonly="1">
+                                <tree>
+                                    <field name="name"/>
+                                    <field name="partner_id"/>
+                                    <field name="date_next_billing"/>
+                                </tree>
+                            </field>
+                            <div class="oe_button_box" name="button_box">
+                                <button name="action_view_tasks" type="object" class="oe_stat_button" icon="fa-tasks">
+                                    <span>Ver Tareas</span>
+                                </button>
+                            </div>
+                        </page>
+                        <page string="Facturas Generadas" name="invoices">
+                            <field name="invoice_ids" readonly="1">
+                                <tree>
+                                    <field name="name"/>
+                                    <field name="partner_id"/>
+                                    <field name="invoice_date"/>
+                                    <field name="amount_total"/>
+                                    <field name="state"/>
+                                </tree>
+                            </field>
+                            <div class="oe_button_box" name="button_box">
+                                <button name="action_view_invoices" type="object" class="oe_stat_button" icon="fa-file-text-o">
+                                    <span>Ver Facturas</span>
+                                </button>
+                            </div>
+                        </page>
+                        <page string="Errores" name="errors" attrs="{'invisible': [('error_message', '=', False)]}">
+                            <field name="error_message" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="monthly_invoice_log_action" model="ir.actions.act_window">
+        <field name="name">Log de Facturación Mensual</field>
+        <field name="res_model">monthly.invoice.log</field>
+        <field name="view_mode">tree,form</field>
+        <field name="context">{'create': False}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No hay registros de facturación mensual automática
+            </p>
+            <p>
+                Los registros se crean automáticamente cuando se ejecuta la acción planificada de facturación mensual.
+            </p>
+        </field>
+    </record>
+
+    <!-- Menu Item - bajo Facturación o Proyecto -->
+    <menuitem id="menu_monthly_invoice_log"
+        name="Log Facturación Mensual"
+        parent="project.menu_project_config"
+        action="monthly_invoice_log_action"
+        sequence="100"/>
+</odoo>

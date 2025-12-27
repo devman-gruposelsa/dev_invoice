@@ -14,6 +14,13 @@ class AccountMoveInherit(models.Model):
                              compute='_compute_task_id',
                              store=True,
                              copy=False)  # Evitar copiar al duplicar facturas
+    
+    is_monthly_invoice = fields.Boolean(
+        string='Factura Mensual',
+        default=False,
+        help='Indica si esta factura fue generada por el proceso de facturación mensual.',
+        copy=False
+    )
 
     @api.depends('invoice_line_ids.task_id', 'invoice_line_ids.sale_id.task_ids', 'move_type')
     def _compute_task_id(self):
@@ -33,16 +40,15 @@ class AccountMoveInherit(models.Model):
             sales_to_check = set()
             
             for line in rec.invoice_line_ids:
-                if line.task_id and line.task_id.project_id.importation:
+                # Relacionar todas las tasks de las líneas, sin filtrar por importation
+                if line.task_id:
                     task_ids.add(line.task_id.id)
-                elif line.sale_id:
+                if line.sale_id:
                     sales_to_check.add(line.sale_id.id)
             
             # If we have sales orders, get their tasks efficiently
             if sales_to_check:
-                sale_tasks = self.env['sale.order'].browse(list(sales_to_check)).mapped('task_ids').filtered(
-                    lambda t: t.project_id.importation
-                )
+                sale_tasks = self.env['sale.order'].browse(list(sales_to_check)).mapped('task_ids')
                 task_ids.update(sale_tasks.ids)
             
             # Update tasks in one operation
@@ -55,13 +61,22 @@ class AccountMoveInherit(models.Model):
     @api.model
     def create(self, vals):
         record = super(AccountMoveInherit, self).create(vals)
-        # record._update_task_relations() # Removed
         return record
 
     def write(self, vals):
+        # Guardar tasks antes del cambio para actualizar después si cambia el estado
+        tasks_to_update = self.env['project.task']
+        if 'state' in vals:
+            # Recolectar tasks de las líneas de factura
+            for move in self:
+                tasks_to_update |= move.invoice_line_ids.mapped('task_id')
+        
         res = super(AccountMoveInherit, self).write(vals)
-        # if 'invoice_line_ids' in vals: # Removed
-            # self._update_task_relations() # Removed
+        
+        # Si cambió el estado, actualizar days_invoiced en las tasks
+        if 'state' in vals and tasks_to_update:
+            tasks_to_update._compute_days_storage_invoiced()
+        
         return res
 
     # def _update_task_relations(self): # Entire method removed
@@ -90,24 +105,26 @@ class AccountMoveInherit(models.Model):
         for rec in self:
             if rec.invoice_origin and 'Storage' in rec.invoice_origin.lower():
                 if rec.invoice_date:
-                    _logger.info(f"Procesando cálculo de próxima fecha de facturación para factura {rec.id}")
                     for task in rec.task_id:
                         # Calcular la fecha 30 días después de la fecha de la factura
                         next_billing_date = rec.invoice_date + timedelta(days=30)
                         task.date_next_billing = next_billing_date
-                        _logger.info(f"Actualizada la próxima fecha de facturación para la tarea {task.id}: {next_billing_date}")
-                else:
-                    _logger.warning(f"La factura {rec.id} no tiene una fecha de factura válida.")
         return res
 
     def unlink(self):
+        # Guardar tasks para actualizar después de eliminar
+        tasks_to_update = self.env['project.task']
         for rec in self:
+            tasks_to_update |= rec.invoice_line_ids.mapped('task_id')
             if rec.invoice_origin and 'storage' in rec.invoice_origin.lower():
-                _logger.info(f"Eliminando la fecha de próxima facturación para las tareas asociadas a la factura {rec.id}")
                 for task in rec.task_id:
                     task.date_next_billing = False
-                    _logger.info(f"Fecha de próxima facturación eliminada para la tarea {task.id}")
+        
         res = super(AccountMoveInherit, self).unlink()
+        
+        # Actualizar days_invoiced en las tasks después de eliminar
+        if tasks_to_update:
+            tasks_to_update._compute_days_storage_invoiced()
 
         return res
 

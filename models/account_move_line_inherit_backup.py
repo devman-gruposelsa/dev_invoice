@@ -28,13 +28,6 @@ class AccountMoveLineInherit(models.Model):
         string='Calculo custom',
         help='Campo para indicar si se debe calcular el subtotal de forma personalizada.',
     )
-    
-    # Campo para indicar que el precio ya fue calculado correctamente y no debe recalcularse
-    price_locked = fields.Boolean(
-        string='Precio bloqueado',
-        default=False,
-        help='Si está marcado, el precio no se recalculará automáticamente.',
-    )
 
     # Agregamos un campo para almacenar nuestro subtotal personalizado
     custom_subtotal = fields.Float(
@@ -63,16 +56,6 @@ class AccountMoveLineInherit(models.Model):
     @api.depends('quantity', 'price_unit', 'product_id', 'days_storage', 'calculate_custom', 'move_id.currency_id', 'move_id.date')
     def _compute_custom_subtotal(self):
         for line in self:
-            # Si el precio está bloqueado (viene de sale_order_inherit), NO modificar nada
-            if line.price_locked:
-                line.custom_subtotal = line.price_unit * line.quantity
-                continue
-            
-            # Si viene del contexto skip_custom_pricing, tampoco modificar
-            if self.env.context.get('skip_custom_pricing'):
-                line.custom_subtotal = line.price_unit * line.quantity
-                continue
-                
             if not line.calculate_custom or not line.product_id:
                 line.custom_subtotal = 0.0
                 continue
@@ -229,23 +212,8 @@ class AccountMoveLineInherit(models.Model):
 
     @api.depends("quantity", "days_storage", "product_id", "calculate_custom")
     def _compute_price_unit(self):
-        # Filtrar las líneas que NO tienen price_locked para pasarlas al super()
-        # Las líneas con price_locked NO deben ser procesadas por el super()
-        lines_without_lock = self.filtered(lambda l: not l.price_locked)
-        lines_with_lock = self.filtered(lambda l: l.price_locked)
-        
-        # Solo ejecutar super() para las líneas SIN price_locked
-        if lines_without_lock:
-            super(AccountMoveLineInherit, lines_without_lock)._compute_price_unit()
-        
-        # Para las líneas con price_locked, no hacer nada (mantener el precio actual)
-        # El precio ya fue establecido correctamente en el create()
-        
-        for line in lines_without_lock:
-            # Si viene del contexto skip_custom_pricing, tampoco recalcular
-            if self.env.context.get('skip_custom_pricing'):
-                continue
-                
+        super()._compute_price_unit()
+        for line in self:
             if not line.calculate_custom or not line.product_id:
                 continue
 
@@ -307,11 +275,6 @@ class AccountMoveLineInherit(models.Model):
     def _get_computed_price(self):
         """Método para obtener el precio computado según el tipo de producto"""
         self.ensure_one()
-        
-        # Si el precio está bloqueado, retornar el precio actual sin modificar
-        if self.price_locked:
-            return self.price_unit
-            
         if not self.calculate_custom or not self.product_id:
             return self.price_unit
 
@@ -365,27 +328,8 @@ class AccountMoveLineInherit(models.Model):
 
     @api.model
     def create(self, vals):
-        # Guardar valores originales si price_locked está en True
-        price_locked = vals.get('price_locked', False)
-        original_price_unit = vals.get('price_unit')
-        original_quantity = vals.get('quantity')
-        
         res = super().create(vals)
-        
-        # Si price_locked está en True, FORZAR los valores originales
-        # porque el super().create() puede haberlos modificado
-        if price_locked and (original_price_unit is not None or original_quantity is not None):
-            update_vals = {}
-            if original_price_unit is not None and res.price_unit != original_price_unit:
-                update_vals['price_unit'] = original_price_unit
-            if original_quantity is not None and res.quantity != original_quantity:
-                update_vals['quantity'] = original_quantity
-            if update_vals:
-                res.with_context(check_move_validity=False, skip_custom_pricing=True).write(update_vals)
-        # Si viene del contexto skip_custom_pricing pero no tiene price_locked
-        elif self.env.context.get('skip_custom_pricing'):
-            pass  # No modificar el precio
-        elif res.calculate_custom and not res.price_locked:
+        if res.calculate_custom:
             price = res._get_computed_price()
             if price != res.price_unit:
                 res.with_context(check_move_validity=False).write({'price_unit': price})
@@ -406,12 +350,9 @@ class AccountMoveLineInherit(models.Model):
         
         res = super().write(vals)
         
-        # Solo recalcular precio si se modifican campos relevantes Y el precio no está bloqueado
+        # Solo recalcular precio si se modifican campos relevantes
         if any(field in vals for field in ['calculate_custom', 'quantity', 'days_storage']) and 'price_unit' not in vals:
             for line in self:
-                # Respetar price_locked - no recalcular si está bloqueado
-                if line.price_locked or self.env.context.get('skip_custom_pricing'):
-                    continue
                 if line.calculate_custom and line.product_id.product_tmpl_id.is_storage:
                     self._compute_price_unit()
         
