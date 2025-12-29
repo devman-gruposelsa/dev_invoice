@@ -41,6 +41,11 @@ class MonthlyInvoiceLog(models.Model):
         ('error', 'Error'),
     ], string='Estado', readonly=True, default='success')
     
+    origin = fields.Selection([
+        ('cron', 'Automático (Cron)'),
+        ('manual', 'Manual (Usuario)'),
+    ], string='Origen', readonly=True, default='manual')
+    
     notes = fields.Text(
         string='Notas / Resumen',
         readonly=True
@@ -68,13 +73,14 @@ class MonthlyInvoiceLog(models.Model):
         readonly=True
     )
 
-    @api.depends('execution_date')
+    @api.depends('execution_date', 'origin')
     def _compute_name(self):
         for record in self:
+            origin_label = 'CRON' if record.origin == 'cron' else 'MANUAL'
             if record.execution_date:
-                record.name = f"Facturación Mensual - {record.execution_date.strftime('%d/%m/%Y %H:%M')}"
+                record.name = f"[{origin_label}] Facturación Mensual - {record.execution_date.strftime('%d/%m/%Y %H:%M')}"
             else:
-                record.name = "Facturación Mensual"
+                record.name = f"[{origin_label}] Facturación Mensual"
 
     def action_view_tasks(self):
         """Abrir vista de tareas relacionadas"""

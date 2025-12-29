@@ -7,6 +7,7 @@
         <field name="arch" type="xml">
             <tree string="Log de Facturación Mensual">
                 <field name="execution_date"/>
+                <field name="origin" widget="badge" decoration-info="origin == 'cron'" decoration-warning="origin == 'manual'"/>
                 <field name="user_id"/>
                 <field name="tasks_found"/>
                 <field name="tasks_processed"/>
@@ -35,6 +36,7 @@
                         <group string="Información General">
                             <field name="execution_date"/>
                             <field name="user_id"/>
+                            <field name="origin" widget="badge"/>
                         </group>
                         <group string="Resultados">
                             <field name="tasks_found"/>

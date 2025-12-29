@@ -266,7 +266,6 @@ class ProjectTask(models.Model):
                     'calculate_custom': calculate_custom,
                     'price_unit': product.lst_price,
                     'name': product_name,
-                    'account_id': product.categ_id.property_account_income_categ_id.id,
                     'task_id': task.id,  # Relación con la tarea
                 })
                 _logger.info(f"Línea de factura creada con ID: {line.id}, relacionada con la tarea {task.name} (ID: {task.id})")
@@ -346,7 +345,6 @@ class ProjectTask(models.Model):
             'calculate_custom': True,
             'price_unit': price_unit,
             'name': name,
-            'account_id': product.categ_id.property_account_income_categ_id.id,
             'task_id': task.id,
         }
 
@@ -439,7 +437,6 @@ class ProjectTask(models.Model):
                             'calculate_custom': calculate_custom,
                             'fob_total': fob_total,
                             'name': name,
-                            'account_id': product.categ_id.property_account_income_categ_id.id,
                             'task_id': task.id,
                         })
                     else:
@@ -498,7 +495,6 @@ class ProjectTask(models.Model):
                         'calculate_custom': calculate_custom,
                         'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                         'name': name,
-                        'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
                     })
                 else:
@@ -514,7 +510,6 @@ class ProjectTask(models.Model):
                         'calculate_custom': calculate_custom,
                         'price_unit': product.lst_price,
                         'name': name,
-                        'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
                     })
 
@@ -534,60 +529,11 @@ class ProjectTask(models.Model):
                 'target': 'current',
             }
 
-    def _cron_generate_storage_invoices(self):
-        account_move_obj = self.env['account.move']
-        account_move_line_obj = self.env['account.move.line']
-        tasks = self.search([])  # Ajusta el dominio según sea necesario
-
-        for task in tasks:
-            if task.egreso_completo:
-                # Ignorar tareas con egreso_completo=True
-                continue
-
-            if not task.project_id.importation:
-                # Ignorar tareas cuyo proyecto no tiene importation=True
-                continue
-
-            if task.date_next_billing and task.date_next_billing > fields.Date.today():
-                # Ignorar tareas cuya próxima fecha de facturación es mayor a la fecha actual
-                continue
-
-            # Buscar productos asociados al campo específico
-            products = self.env['product.product'].search([('product_tmpl_id.outcome_invoice_pack', '=', True)])
-            if not products:
-                raise ValidationError('No hay productos configurados con el paquete solicitado.')
-
-            # Crear la factura
-            invoice = account_move_obj.create({
-                'partner_id': task.partner_id.id,
-                'move_type': 'out_invoice',  # Factura de cliente
-                'invoice_origin': f"Storage - {task.name}",
-            })
-            _logger.info(f"Factura creada con ID: {invoice.id} para la tarea {task.name} (ID: {task.id})")
-
-            # Agregar líneas de factura
-            for product in products:
-                line = account_move_line_obj.create({
-                    'move_id': invoice.id,
-                    'product_id': product.id,
-                    'quantity': 1,  # Ajusta según sea necesario
-                    'price_unit': product.lst_price,
-                    'name': f"{product.name} - {task.name}",
-                    'account_id': product.categ_id.property_account_income_categ_id.id,
-                    'task_id': task.id,  # Relación con la tarea
-                })
-                _logger.info(f"Línea de factura creada con ID: {line.id}, relacionada con la tarea {task.name} (ID: {task.id})")
-            
-            try:
-                invoice.button_update_prices_from_pricelist()
-            except Exception as e:
-                _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
-
-            # Verificar si las líneas tienen el task_id asignado
-            for line in invoice.invoice_line_ids:
-                _logger.info(f"Línea de factura {line.id} asociada a la tarea {line.task_id.id if line.task_id else 'No asignada'}")
-
-        return True
+    # DEPRECATED: Este método fue reemplazado por _cron_generate_monthly_invoices
+    # Se mantiene comentado por compatibilidad histórica
+    # def _cron_generate_storage_invoices(self):
+    #     """OBSOLETO - Usar _cron_generate_monthly_invoices en su lugar"""
+    #     pass
 
     def _create_single_task_invoice(self, task):
         account_move_obj = self.env['account.move']
@@ -661,7 +607,6 @@ class ProjectTask(models.Model):
                         'calculate_custom': calculate_custom, # Ensure calculate_custom is defined correctly for this block
                         'fob_total': fob_total,
                         'name': name,
-                        'account_id': product.categ_id.property_account_income_categ_id.id,
                         'task_id': task.id,
                     })
                 else:
@@ -719,7 +664,6 @@ class ProjectTask(models.Model):
                     'calculate_custom': calculate_custom,
                     'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                     'name': name,
-                    'account_id': product.categ_id.property_account_income_categ_id.id,
                     'task_id': task.id,
                 })
             else:
@@ -731,7 +675,6 @@ class ProjectTask(models.Model):
                     'calculate_custom': False,
                     'price_unit': product.lst_price,
                     'name': f"{product.name} - {task.name}",
-                    'account_id': product.categ_id.property_account_income_categ_id.id,
                     'task_id': task.id,
                 })
 
@@ -743,7 +686,7 @@ class ProjectTask(models.Model):
 
         return invoice
 
-    def action_generate_monthly_invoices(self):
+    def action_generate_monthly_invoices(self, skip_log=False):
         # Agrupar tareas por cliente y por IMO
         grouped_tasks = {}
         invalid_tasks = []
@@ -848,7 +791,6 @@ class ProjectTask(models.Model):
                             'calculate_custom': True,
                             'fob_total': total_fob_for_invoice,
                             'name': name,
-                            'account_id': product.categ_id.property_account_income_categ_id.id,
                             # No task_id here as it's a consolidated line for multiple tasks
                         })
 
@@ -903,7 +845,6 @@ class ProjectTask(models.Model):
                             'calculate_custom': True,
                             'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                             'name': name,
-                            'account_id': product.categ_id.property_account_income_categ_id.id,
                             'task_id': task_in_group.id,
                         })
                 else:
@@ -922,7 +863,6 @@ class ProjectTask(models.Model):
                         'calculate_custom': False,
                         'price_unit': product.lst_price,
                         'name': name,
-                        'account_id': product.categ_id.property_account_income_categ_id.id,
                         # No task_id específico ya que es una línea consolidada para múltiples tareas
                     })
 
@@ -932,6 +872,25 @@ class ProjectTask(models.Model):
                 _logger.error(f"Error al actualizar precios para la factura {invoice.id}: {str(e)}")
 
         _logger.info("Proceso de generación de facturas mensuales completado")
+
+        # Crear log de la ejecución manual (solo si no viene del cron)
+        if not skip_log:
+            log_obj = self.env['monthly.invoice.log']
+            all_tasks = self  # Todas las tareas seleccionadas
+            task_list_notes = [f"- {task.name} | Partner: {task.partner_id.name}" for task in all_tasks if not task.egreso_completo]
+            
+            log_values = {
+                'tasks_found': len(all_tasks),
+                'tasks_processed': len(all_tasks) - len(invalid_tasks) if 'invalid_tasks' in dir() else len(all_tasks),
+                'invoices_created': len(created_invoice_ids),
+                'task_ids': [(6, 0, [t.id for t in all_tasks if not t.egreso_completo])],
+                'invoice_ids': [(6, 0, created_invoice_ids)],
+                'origin': 'manual',
+                'state': 'success' if created_invoice_ids else 'partial',
+                'notes': f"Facturación mensual ejecutada manualmente.\n\nTránsitos procesados:\n" + "\n".join(task_list_notes) if task_list_notes else "No se procesaron tránsitos.",
+            }
+            log_obj.create(log_values)
+            _logger.info(f"[MANUAL-MONTHLY] Log de facturación manual creado. Tareas: {len(all_tasks)}, Facturas: {len(created_invoice_ids)}")
 
         if not created_invoice_ids:
             _logger.info("No invoices were generated by action_generate_monthly_invoices.")
@@ -1001,6 +960,7 @@ class ProjectTask(models.Model):
                 'tasks_processed': 0,
                 'invoices_created': 0,
                 'state': 'success',
+                'origin': 'cron',
                 'notes': 'No se encontraron tareas pendientes de facturación mensual.',
             })
             _logger.info(f"[CRON-MONTHLY] ========== FIN FACTURACIÓN MENSUAL AUTOMÁTICA ==========")
@@ -1018,6 +978,7 @@ class ProjectTask(models.Model):
         log_values = {
             'tasks_found': len(tasks),
             'task_ids': [(6, 0, tasks.ids)],
+            'origin': 'cron',
         }
         
         try:
@@ -1028,8 +989,8 @@ class ProjectTask(models.Model):
             ])
             invoices_before_ids = set(invoices_before.ids)
             
-            # Usar la misma lógica que la acción manual
-            tasks.action_generate_monthly_invoices()
+            # Usar la misma lógica que la acción manual (sin crear log duplicado)
+            tasks.action_generate_monthly_invoices(skip_log=True)
             
             # Obtener facturas después para identificar las nuevas
             invoices_after = self.env['account.move'].search([

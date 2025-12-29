@@ -13,5 +13,20 @@
             <field name="doall" eval="False"/>
             <field name="active" eval="True"/>
         </record>
+
+        <!-- Cron de Facturación Mensual Automática -->
+        <record id="ir_cron_monthly_invoices" model="ir.cron">
+            <field name="name">Facturación Mensual Automática</field>
+            <field name="model_id" ref="project.model_project_task"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_generate_monthly_invoices()</field>
+            <field name="user_id" ref="base.user_root"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="doall" eval="False"/>
+            <field name="active" eval="True"/>
+            <field name="nextcall" eval="(DateTime.now() + timedelta(days=1)).strftime('%Y-%m-%d 06:00:00')"/>
+        </record>
     </data>
 </odoo>
