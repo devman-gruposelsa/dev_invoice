@@ -266,6 +266,8 @@ class ProjectTask(models.Model):
                     'calculate_custom': calculate_custom,
                     'price_unit': product.lst_price,
                     'name': product_name,
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
+                    'tax_ids': [(6, 0, product.taxes_id.ids)],
                     'task_id': task.id,  # Relación con la tarea
                 })
                 _logger.info(f"Línea de factura creada con ID: {line.id}, relacionada con la tarea {task.name} (ID: {task.id})")
@@ -345,6 +347,8 @@ class ProjectTask(models.Model):
             'calculate_custom': True,
             'price_unit': price_unit,
             'name': name,
+            'account_id': product.categ_id.property_account_income_categ_id.id,
+            'tax_ids': [(6, 0, product.taxes_id.ids)],
             'task_id': task.id,
         }
 
@@ -437,6 +441,8 @@ class ProjectTask(models.Model):
                             'calculate_custom': calculate_custom,
                             'fob_total': fob_total,
                             'name': name,
+                            'account_id': product.categ_id.property_account_income_categ_id.id,
+                            'tax_ids': [(6, 0, product.taxes_id.ids)],
                             'task_id': task.id,
                         })
                     else:
@@ -495,6 +501,8 @@ class ProjectTask(models.Model):
                         'calculate_custom': calculate_custom,
                         'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                         'name': name,
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        'tax_ids': [(6, 0, product.taxes_id.ids)],
                         'task_id': task.id,
                     })
                 else:
@@ -510,6 +518,8 @@ class ProjectTask(models.Model):
                         'calculate_custom': calculate_custom,
                         'price_unit': product.lst_price,
                         'name': name,
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        'tax_ids': [(6, 0, product.taxes_id.ids)],
                         'task_id': task.id,
                     })
 
@@ -607,6 +617,8 @@ class ProjectTask(models.Model):
                         'calculate_custom': calculate_custom, # Ensure calculate_custom is defined correctly for this block
                         'fob_total': fob_total,
                         'name': name,
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        'tax_ids': [(6, 0, product.taxes_id.ids)],
                         'task_id': task.id,
                     })
                 else:
@@ -664,6 +676,8 @@ class ProjectTask(models.Model):
                     'calculate_custom': calculate_custom,
                     'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                     'name': name,
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
+                    'tax_ids': [(6, 0, product.taxes_id.ids)],
                     'task_id': task.id,
                 })
             else:
@@ -675,6 +689,8 @@ class ProjectTask(models.Model):
                     'calculate_custom': False,
                     'price_unit': product.lst_price,
                     'name': f"{product.name} - {task.name}",
+                    'account_id': product.categ_id.property_account_income_categ_id.id,
+                    'tax_ids': [(6, 0, product.taxes_id.ids)],
                     'task_id': task.id,
                 })
 
@@ -791,6 +807,8 @@ class ProjectTask(models.Model):
                             'calculate_custom': True,
                             'fob_total': total_fob_for_invoice,
                             'name': name,
+                            'account_id': product.categ_id.property_account_income_categ_id.id,
+                            'tax_ids': [(6, 0, product.taxes_id.ids)],
                             # No task_id here as it's a consolidated line for multiple tasks
                         })
 
@@ -845,6 +863,8 @@ class ProjectTask(models.Model):
                             'calculate_custom': True,
                             'price_unit': daily_rate_to_use, # Use the pricelist-derived or fallback rate
                             'name': name,
+                            'account_id': product.categ_id.property_account_income_categ_id.id,
+                            'tax_ids': [(6, 0, product.taxes_id.ids)],
                             'task_id': task_in_group.id,
                         })
                 else:
@@ -863,6 +883,8 @@ class ProjectTask(models.Model):
                         'calculate_custom': False,
                         'price_unit': product.lst_price,
                         'name': name,
+                        'account_id': product.categ_id.property_account_income_categ_id.id,
+                        'tax_ids': [(6, 0, product.taxes_id.ids)],
                         # No task_id específico ya que es una línea consolidada para múltiples tareas
                     })
 
